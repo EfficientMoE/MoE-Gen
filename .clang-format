@@ -1,0 +1,27 @@
+
+BasedOnStyle: Google
+UseTab: Never
+IndentWidth: 4
+ColumnLimit: 80
+
+# Force pointers to the type for C++.
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Reordering #include statements can (and currently will) introduce errors
+SortIncludes: false
+
+# Style choices
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+IndentPPDirectives: BeforeHash
+
+IncludeCategories:
+  - Regex:           '^<ext/.*\.h>'
+    Priority:        2
+  - Regex:           '^<.*\.h>'
+    Priority:        1
+  - Regex:           '^<.*'
+    Priority:        2
+  - Regex:           '.*'
+    Priority:        3

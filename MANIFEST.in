@@ -1,0 +1,3 @@
+recursive-include core *.cpp *.h *.cc
+recursive-include external *.cpp *.h *.cc *.hpp
+recursive-include op_builder *.py
