@@ -35,7 +35,7 @@
 ## Release Plan
 
 * Integrate DeepSeek FlashMLA and DeepGEMM.
-* Optimization on Ada and Hopper architecture. 
+* Optimization on Ada and Hopper architecture.
 * Support moonshotai/Moonlight MoE.
 
 ## Installation
