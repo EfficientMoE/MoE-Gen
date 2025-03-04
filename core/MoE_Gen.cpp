@@ -121,7 +121,7 @@ void MoE_Gen::Terminate() {
 // };
 
 void MoE_Gen::set_batching_plan(
-    std::vector<std::vector<int64_t>> batching_plan){
+    std::vector<std::vector<int64_t>> batching_plan) {
     /* Set the batching */
 };
 
