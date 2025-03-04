@@ -47,6 +47,10 @@ try:
 except ImportError:
     # jit compile
     from core_engine import Parameter_Server
+from typing import Tuple
+
+import deep_gemm
+
 from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 
 # current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,8 +60,6 @@ from .modeling_deepseek_v3 import (
     apply_rotary_pos_emb,
     rotate_half,
 )
-import deep_gemm
-from typing import Tuple
 
 
 def rotary_pos_emb(t, cos, sin, position_ids, unsqueeze_dim=1):
@@ -177,29 +179,37 @@ def per_token_cast_to_fp8(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     m, n = x.shape
     x_view = x.view(m, -1, 128)
     x_amax = x_view.abs().float().amax(dim=2).view(m, -1).clamp(1e-4)
-    return (x_view * (448.0 / x_amax.unsqueeze(2))).to(torch.float8_e4m3fn).view(m, n), (x_amax / 448.0).view(m, -1)
+    return (x_view * (448.0 / x_amax.unsqueeze(2))).to(
+        torch.float8_e4m3fn
+    ).view(m, n), (x_amax / 448.0).view(m, -1)
 
 
 def per_block_cast_to_fp8(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.dim() == 2
     m, n = x.shape
-    x_padded = torch.zeros((ceil_div(m, 128) * 128, ceil_div(n, 128) * 128), dtype=x.dtype, device=x.device)
+    x_padded = torch.zeros(
+        (ceil_div(m, 128) * 128, ceil_div(n, 128) * 128),
+        dtype=x.dtype,
+        device=x.device,
+    )
     x_padded[:m, :n] = x
     x_view = x_padded.view(-1, 128, x_padded.size(1) // 128, 128)
     x_amax = x_view.abs().float().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
     x_scaled = (x_view * (448.0 / x_amax)).to(torch.float8_e4m3fn)
-    return x_scaled.view_as(x_padded)[:m, :n].contiguous(), (x_amax / 448.0).view(x_view.size(0), x_view.size(2))
+    return x_scaled.view_as(x_padded)[:m, :n].contiguous(), (
+        x_amax / 448.0
+    ).view(x_view.size(0), x_view.size(2))
 
 
 def w8a16_gemm(
     weight_data_fp8: torch.Tensor,
     weight_scale_inv_fp32: torch.Tensor,
-    activation_bf16: torch.Tensor
+    activation_bf16: torch.Tensor,
 ) -> torch.Tensor:
     """
-        activation_bf16: [n_group, m, k]
-        weight_data_fp8: [m, n]
-        weight_scale_inv_fp32: [m, n]
+    activation_bf16: [n_group, m, k]
+    weight_data_fp8: [m, n]
+    weight_scale_inv_fp32: [m, n]
     """
     assert weight_data_fp8.dim() == 2
     assert activation_bf16.dim() == 3
@@ -227,21 +237,45 @@ def attn_fp8(
     bsz, num_heads, q_len, q_head_dim = Q_bf16.size()
     _, _, kv_seq_len, _ = K_bf16.size()
     _, _, _, v_head_dim = V_bf16.size()
-    Q_bf16 = Q_bf16.view(bsz*num_heads, q_len, q_head_dim)
-    K_bf16 = K_bf16.view(bsz*num_heads, kv_seq_len, q_head_dim)
-    V_bf16 = V_bf16.view(bsz*num_heads, kv_seq_len, v_head_dim)
+    Q_bf16 = Q_bf16.view(bsz * num_heads, q_len, q_head_dim)
+    K_bf16 = K_bf16.view(bsz * num_heads, kv_seq_len, q_head_dim)
+    V_bf16 = V_bf16.view(bsz * num_heads, kv_seq_len, v_head_dim)
 
     # QKT
-    Q_fp8 = (torch.empty_like(Q_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, q_len, q_head_dim // 128), device=Q_bf16.device, dtype=torch.float))
-    K_fp8 = (torch.empty_like(K_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, kv_seq_len, q_head_dim // 128), device=K_bf16.device, dtype=torch.float))
-    attn_weights = torch.empty((bsz*num_heads, q_len, kv_seq_len), device=Q_bf16.device, dtype=torch.bfloat16)
-    for i in range(bsz*num_heads):
+    Q_fp8 = (
+        torch.empty_like(Q_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, q_len, q_head_dim // 128),
+            device=Q_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    K_fp8 = (
+        torch.empty_like(K_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, kv_seq_len, q_head_dim // 128),
+            device=K_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_weights = torch.empty(
+        (bsz * num_heads, q_len, kv_seq_len),
+        device=Q_bf16.device,
+        dtype=torch.bfloat16,
+    )
+    for i in range(bsz * num_heads):
         Q_fp8[0][i], Q_fp8[1][i] = per_token_cast_to_fp8(Q_bf16[i])
         K_fp8[0][i], K_fp8[1][i] = per_block_cast_to_fp8(K_bf16[i])
     K_fp8 = (K_fp8[0], get_col_major_tma_aligned_tensor(K_fp8[1]))
-    m_indices = torch.arange(0, num_groups, device=Q_bf16.device, dtype=torch.int)
-    m_indices = m_indices.unsqueeze(-1).expand(num_groups, m).contiguous().view(-1)
-    deep_gemm.m_grouped_gemm_fp8_fp8_bf16_nt_contiguous(Q_fp8, K_fp8, attn_weights, m_indices)
+    m_indices = torch.arange(
+        0, num_groups, device=Q_bf16.device, dtype=torch.int
+    )
+    m_indices = (
+        m_indices.unsqueeze(-1).expand(num_groups, m).contiguous().view(-1)
+    )
+    deep_gemm.m_grouped_gemm_fp8_fp8_bf16_nt_contiguous(
+        Q_fp8, K_fp8, attn_weights, m_indices
+    )
 
     attn_weights = attn_weights + attention_mask
     attn_weights = nn.functional.softmax(
@@ -249,18 +283,37 @@ def attn_fp8(
     ).to(Q_bf16.dtype)
 
     # A@V
-    V_fp8 = (torch.empty_like(V_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, kv_seq_len, v_head_dim // 128), device=V_bf16.device, dtype=torch.float))
-    attn_weights_fp8 = (torch.empty_like(attn_weights, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, q_len, kv_seq_len // 128), device=attn_weights.device, dtype=torch.float))
-    attn_output = torch.empty((bsz*num_heads, q_len, v_head_dim), device=Q_bf16.device, dtype=torch.bfloat16)
-    for i in range(bsz*num_heads):
+    V_fp8 = (
+        torch.empty_like(V_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, kv_seq_len, v_head_dim // 128),
+            device=V_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_weights_fp8 = (
+        torch.empty_like(attn_weights, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, q_len, kv_seq_len // 128),
+            device=attn_weights.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_output = torch.empty(
+        (bsz * num_heads, q_len, v_head_dim),
+        device=Q_bf16.device,
+        dtype=torch.bfloat16,
+    )
+    for i in range(bsz * num_heads):
         V_fp8[0][i], V_fp8[1][i] = per_token_cast_to_fp8(V_bf16[i])
-        attn_weights_fp8[0][i], attn_weights_fp8[1][i] = per_block_cast_to_fp8(attn_weights[i])
+        attn_weights_fp8[0][i], attn_weights_fp8[1][i] = per_block_cast_to_fp8(
+            attn_weights[i]
+        )
     V_fp8 = (V_fp8[0], get_col_major_tma_aligned_tensor(V_fp8[1]))
     deep_gemm.gemm_fp8_fp8_bf16_nt(V_fp8, attn_weights_fp8, attn_output)
 
     attn_output = attn_output.view(bsz, num_heads, q_len, v_head_dim)
     return attn_output
-
 
 
 @torch.no_grad()
@@ -269,18 +322,36 @@ def prefill_attn_fp8(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
     position_ids: torch.Tensor,
-    weight_dequant_scale: dict
+    weight_dequant_scale: dict,
 ):
     bsz, q_len, _ = hidden_states.size()
     if self.q_lora_rank is None:
-        q = w8a16_gemm(self.q_proj.weight.data, weight_dequant_scale['q_proj.weight_scale_inv'], hidden_states)
+        q = w8a16_gemm(
+            self.q_proj.weight.data,
+            weight_dequant_scale["q_proj.weight_scale_inv"],
+            hidden_states,
+        )
     else:
-        q = w8a16_gemm(self.q_b_proj.weight.data, weight_dequant_scale['q_b_proj.weight_scale_inv'], self.q_a_layernorm(w8a16_gemm(self.q_a_proj.weight.data, weight_dequant_scale['q_a_proj.weight_scale_inv'], hidden_states)))
+        q = w8a16_gemm(
+            self.q_b_proj.weight.data,
+            weight_dequant_scale["q_b_proj.weight_scale_inv"],
+            self.q_a_layernorm(
+                w8a16_gemm(
+                    self.q_a_proj.weight.data,
+                    weight_dequant_scale["q_a_proj.weight_scale_inv"],
+                    hidden_states,
+                )
+            ),
+        )
     q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
     q_nope, q_pe = torch.split(
         q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
     )
-    compressed_kv = w8a16_gemm(self.kv_a_proj_with_mqa.weight.data, weight_dequant_scale['kv_a_proj_with_mqa.weight_scale_inv'], hidden_states)
+    compressed_kv = w8a16_gemm(
+        self.kv_a_proj_with_mqa.weight.data,
+        weight_dequant_scale["kv_a_proj_with_mqa.weight_scale_inv"],
+        hidden_states,
+    )
     new_compressed_kv = compressed_kv.clone()
     kv_len = compressed_kv.size(1)
     assert kv_len == attention_mask.size(-1)
@@ -288,14 +359,18 @@ def prefill_attn_fp8(
         compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
     )
     k_pe = k_pe.view(bsz, kv_len, 1, self.qk_rope_head_dim).transpose(1, 2)
-    kv = w8a16_gemm(self.kv_b_proj.weight.data, weight_dequant_scale['kv_b_proj.weight_scale_inv'], self.kv_a_layernorm(compressed_kv))
+    kv = w8a16_gemm(
+        self.kv_b_proj.weight.data,
+        weight_dequant_scale["kv_b_proj.weight_scale_inv"],
+        self.kv_a_layernorm(compressed_kv),
+    )
     kv = kv.view(
         bsz, kv_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim
     ).transpose(1, 2)
     k_nope, value_states = torch.split(
         kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
     )
-    
+
     kv_seq_len = attention_mask.shape[-1]
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
     q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
@@ -308,7 +383,7 @@ def prefill_attn_fp8(
         bsz, self.num_heads, kv_seq_len, self.q_head_dim
     )
     key_states[:, :, :, : self.qk_nope_head_dim] = k_nope
-    key_states[:, :, :, self.qk_nope_head_dim :] = k_pe   
+    key_states[:, :, :, self.qk_nope_head_dim :] = k_pe
 
     attn_output = attn_fp8(query_states, key_states, value_states)
 
@@ -316,10 +391,12 @@ def prefill_attn_fp8(
     attn_output = attn_output.reshape(
         bsz, q_len, self.num_heads * self.v_head_dim
     )
-    attn_output = w8a16_gemm(self.o_proj.weight.data, weight_dequant_scale['o_proj.weight_scale_inv'], attn_output)
+    attn_output = w8a16_gemm(
+        self.o_proj.weight.data,
+        weight_dequant_scale["o_proj.weight_scale_inv"],
+        attn_output,
+    )
     return attn_output, new_compressed_kv
-
-
 
 
 @torch.no_grad()

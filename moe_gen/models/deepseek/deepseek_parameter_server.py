@@ -18,27 +18,26 @@
 
 import logging
 import os
+import shutil
 from multiprocessing import Process
 
 import torch
 from safetensors.torch import load_file
 from tqdm import tqdm, trange
 from transformers import AutoConfig
-import shutil
 
-from .deepseekv2.modeling_deepseek_v2 import DeepseekV2ForCausalLM
-from .deepseekv3.modeling_deepseek_v3 import DeepseekV3ForCausalLM
 from .deepseekv2.configuration_deepseek_v2 import DeepseekV2Config
+from .deepseekv2.modeling_deepseek_v2 import DeepseekV2ForCausalLM
 from .deepseekv3.configuration_deepseek_v3 import DeepseekV3Config
+from .deepseekv3.modeling_deepseek_v3 import DeepseekV3ForCausalLM
 
 try:
     from moe_gen.core_engine import Parameter_Server
 except ImportError:
     # jit compile
-    from moe_gen.models.engine_loader import core_engine
     from core_engine import Parameter_Server
 
-    
+    from moe_gen.models.engine_loader import core_engine
 
 
 class DeepSeek_Parameter_Server:
@@ -48,11 +47,14 @@ class DeepSeek_Parameter_Server:
         self.pt_ckpt_dir = pt_ckpt_dir
         self.weight_copy_task = {}
         self.state_dict_name_map = {}
-        config_cls = DeepseekV2Config if "V2" in huggingface_ckpt_name else DeepseekV3Config
+        config_cls = (
+            DeepseekV2Config
+            if "V2" in huggingface_ckpt_name
+            else DeepseekV3Config
+        )
         self.hf_model_config = config_cls.from_pretrained(
             huggingface_ckpt_name, trust_remote_code=True
         )
-        
 
         # self.hf_model_config = AutoConfig.from_pretrained(huggingface_ckpt_name, cache_dir=cache_dir, trust_remote_code=True)
 
@@ -197,8 +199,10 @@ class DeepSeek_Parameter_Server:
             # logging.info(f"dst_dir: {dst_dir}")
             if os.path.exists(dst_dir):
                 continue
-            
-            logging.info(f"Checkpoint file: {ckpt} not found in {self.pt_ckpt_dir}. Dump it now. Will omit this step next time run this model.")
+
+            logging.info(
+                f"Checkpoint file: {ckpt} not found in {self.pt_ckpt_dir}. Dump it now. Will omit this step next time run this model."
+            )
             p = Process(target=self.save_and_load, args=(ckpt, dst_dir))
             p.start()
             processes.append(p)
@@ -206,14 +210,18 @@ class DeepSeek_Parameter_Server:
         try:
             for p in processes:
                 p.join()
-                if p.exitcode != 0:  # Check if process terminated with non-zero exit code
+                if (
+                    p.exitcode != 0
+                ):  # Check if process terminated with non-zero exit code
                     print(f"Process terminated with exit code {p.exitcode}")
                     import sys
+
                     sys.exit(1)  # Terminate the program with error code
                 p.close()
         except Exception as e:
             print(f"Error occurred: {e}")
             import sys
+
             sys.exit(1)  # Terminate the program with error code
         logging.info("All safetensor loader processes joined")
 
