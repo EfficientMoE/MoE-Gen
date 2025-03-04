@@ -5,7 +5,7 @@
 </div>
 
 # Latest News
-- [2025-03] MoE-Gen V0.0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture.
+- [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture.
 
 # Supported Models
 - **DeepSeek-R1/V3-671B. FULL Precision.**
