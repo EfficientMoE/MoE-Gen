@@ -10,6 +10,7 @@
 # Supported Models
 - **DeepSeek-R1/V3-671B. FULL Precision.**
 - DeepSeek-V2 Family: V2, V2.5, V2-Lite, V2-Coder.
+- Mixtral: Mixtral 8x7B, Mixtral 8x22B.
 
 # Application Scenarios
 - MoE model evaluation.
