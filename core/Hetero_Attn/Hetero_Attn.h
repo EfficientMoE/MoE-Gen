@@ -92,19 +92,19 @@ class Hetero_Attn {
                                torch::Tensor& position_ids,
                                std::vector<std::vector<int64_t>> micro_batches);
 
-    torch::Tensor _attn_mode_2_deepseekv2(
-        py::object& PyTorch_attn_module, int64_t layer_idx,
-        torch::Tensor& hidden_states, torch::Tensor& attention_mask,
-        torch::Tensor& position_ids,
-        std::vector<std::vector<int64_t>> micro_batches);
+    // torch::Tensor _attn_mode_2_deepseekv2(
+    //     py::object& PyTorch_attn_module, int64_t layer_idx,
+    //     torch::Tensor& hidden_states, torch::Tensor& attention_mask,
+    //     torch::Tensor& position_ids,
+    //     std::vector<std::vector<int64_t>> micro_batches);
 
     std::future<torch::Tensor> CPU_attn_mechanism(
         int64_t layer_idx, torch::Tensor query_states,
         torch::Tensor& key_states, torch::Tensor& value_states,
         torch::Tensor& attention_mask, std::vector<int64_t> cur_batch);
 
-    std::future<torch::Tensor> CPU_attn_mechanism_deepseekv2(
-        int64_t layer_idx, torch::Tensor query_states,
-        torch::Tensor& key_states, torch::Tensor& value_states,
-        torch::Tensor& attention_mask, std::vector<int64_t> cur_batch);
+    // std::future<torch::Tensor> CPU_attn_mechanism_deepseekv2(
+    //     int64_t layer_idx, torch::Tensor query_states,
+    //     torch::Tensor& key_states, torch::Tensor& value_states,
+    //     torch::Tensor& attention_mask, std::vector<int64_t> cur_batch);
 };

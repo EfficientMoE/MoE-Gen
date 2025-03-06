@@ -42,7 +42,7 @@ if __name__ == "__main__":
     """
         Step 1: Select Model.
     """
-    hugging_face_checkpoint = "deepseek-ai/DeepSeek-V2-Lite-Chat"
+    hugging_face_checkpoint = "mistralai/Mixtral-8x22B-Instruct-v0.1"
 
     """
         Step 2: Load dataset and apply chat template(prompt engineering).
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     benchmark_name = "Muennighoff/flan"
     dataset = datasets.load_dataset(benchmark_name, split="train")
 
-    max_prompts = 500
+    max_prompts = 300
     queries = dataset["inputs"][:max_prompts]
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         max_input_length=512,
         max_decoding_length=32,
         device=[0],
-        host_kv_cache_size=10,
+        host_kv_cache_size=50,
     )
 
     """

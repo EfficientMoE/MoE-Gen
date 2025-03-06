@@ -716,6 +716,11 @@ class DeepSeek_Initializer:
 
         return model_config
 
+    def save_and_load(self, file_path, save_dir):
+        tensor_dict = load_file(file_path)
+        torch.save(tensor_dict, save_dir)
+        return tensor_dict
+    
     def _save_safetensors_to_pt(self):
         ckpt_files = os.listdir(self.cache_dir)
         ckpt_files = [
@@ -724,10 +729,7 @@ class DeepSeek_Initializer:
             if ckpt.endswith(".safetensors")
         ]
 
-        def save_and_load(file_path, save_dir):
-            tensor_dict = load_file(file_path)
-            torch.save(tensor_dict, save_dir)
-            return tensor_dict
+
 
         processes = []
         for ckpt in tqdm(
@@ -740,7 +742,7 @@ class DeepSeek_Initializer:
             if os.path.exists(dst_dir):
                 continue
 
-            p = Process(target=save_and_load, args=(ckpt, dst_dir))
+            p = Process(target=self.save_and_load, args=(ckpt, dst_dir))
             p.start()
             processes.append(p)
 

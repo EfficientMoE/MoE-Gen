@@ -23,6 +23,7 @@ import torch
 import triton
 import triton.language as tl
 from transformers.cache_utils import DynamicCache
+from transformers import MixtralForCausalLM
 
 
 def update_casual_mask(attention_mask):
@@ -357,7 +358,20 @@ class Attn_Wrapper(torch.nn.Module):
                             device=kwargs["hidden_states"].device,
                         )
                     else:
-                        output = self.module(**arg_dict)
+                        kv = DynamicCache()
+                        for i in range(self.layer_idx):
+                            kv.key_cache.append(None)
+                            kv.value_cache.append(None)
+                        output = self.module(
+                            hidden_states=arg_dict["hidden_states"][
+                                cur_batch_start:cur_batch_end
+                            ],
+                            attention_mask=arg_dict["attention_mask"][
+                                cur_batch_start:cur_batch_end
+                            ],
+                            position_ids=arg_dict["position_ids"],
+                            past_key_value=kv
+                        )
                         key_cache = output[2].key_cache[self.layer_idx]
                         value_cache = output[2].value_cache[self.layer_idx]
 

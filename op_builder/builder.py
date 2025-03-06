@@ -418,10 +418,10 @@ class OpBuilder(ABC):
         try:
             cpu_info = get_cpu_info()
         except Exception as e:
-            self.warning(
-                f"{self.name} attempted to use `py-cpuinfo` but failed (exception type: {type(e)}, {e}), "
-                "falling back to `lscpu` to get this information."
-            )
+            # self.warning(
+            #     f"{self.name} attempted to use `py-cpuinfo` but failed (exception type: {type(e)}, {e}), "
+            #     "falling back to `lscpu` to get this information."
+            # )
             cpu_info = self._backup_cpuinfo()
             if cpu_info is None:
                 return "-march=native"
@@ -482,10 +482,10 @@ class OpBuilder(ABC):
         try:
             cpu_info = get_cpu_info()
         except Exception as e:
-            self.warning(
-                f"{self.name} attempted to use `py-cpuinfo` but failed (exception type: {type(e)}, {e}), "
-                "falling back to `lscpu` to get this information."
-            )
+            # self.warning(
+            #     f"{self.name} attempted to use `py-cpuinfo` but failed (exception type: {type(e)}, {e}), "
+            #     "falling back to `lscpu` to get this information."
+            # )
             cpu_info = self._backup_cpuinfo()
             if cpu_info is None:
                 return "-D__SCALAR__"
@@ -606,8 +606,8 @@ class OpBuilder(ABC):
         )
 
         build_duration = time.time() - start_build
-        if verbose:
-            print(f"Time to load {self.name} op: {build_duration} seconds")
+        # if verbose:
+        #     print(f"Time to load {self.name} op: {build_duration} seconds")
 
         # Reset arch list so we are not silently removing it for other possible use cases
         if torch_arch_list:

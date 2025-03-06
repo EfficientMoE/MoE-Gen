@@ -62,7 +62,7 @@ class CoreEngineBuilder(OpBuilder):
             f"{MOE_GEN_CORE_ROOT}/Parameter_Server/posix_shm.cpp",
             f"{MOE_GEN_CORE_ROOT}/GPU_Weight_Buffer/GPU_Weight_Buffer.cpp",
             f"{MOE_GEN_CORE_ROOT}/GPU_KV_Buffer/GPU_KV_Buffer.cpp",
-            f"{MOE_GEN_CORE_ROOT}/Hetero_Attn/CPU_Kernels/grouped_query_attention_cpu_avx2.cpp",
+            f"{MOE_GEN_CORE_ROOT}/Hetero_Attn/CPU_Kernels/grouped_query_attention_cpu_avx2_omp.cpp",
             f"{MOE_GEN_CORE_ROOT}/allocator.cpp",
         ]
 
