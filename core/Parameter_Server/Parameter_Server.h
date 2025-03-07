@@ -51,11 +51,11 @@ struct tensor_meta {
     int64_t byte_size;
 
     // default constructor
-    tensor_meta() : offset(0), tensor_shape({}), byte_size(0) {};
+    tensor_meta() : offset(0), tensor_shape({}), byte_size(0){};
     // constructor
     tensor_meta(int64_t offset, std::vector<int64_t> tensor_shape,
                 int64_t byte_size)
-        : offset(offset), tensor_shape(tensor_shape), byte_size(byte_size) {};
+        : offset(offset), tensor_shape(tensor_shape), byte_size(byte_size){};
 };
 
 class Parameter_Server {
