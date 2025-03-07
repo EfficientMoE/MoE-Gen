@@ -3,13 +3,13 @@ name: Build Test
 on:
   push:
     branches:
-      - main
+      - master
       - dev
       - release*
       - prepare-for-open-source
   pull_request:
     branches:
-      - main
+      - master
       - dev
       - release*
 
