@@ -24,12 +24,10 @@ from multiprocessing import Process
 import torch
 from safetensors.torch import load_file
 from tqdm import tqdm, trange
-from transformers import AutoConfig
 
-from .deepseekv2.configuration_deepseek_v2 import DeepseekV2Config
-from .deepseekv2.modeling_deepseek_v2 import DeepseekV2ForCausalLM
-from .deepseekv3.configuration_deepseek_v3 import DeepseekV3Config
-from .deepseekv3.modeling_deepseek_v3 import DeepseekV3ForCausalLM
+# from .deepseekv2.modeling_deepseek_v2 import DeepseekV2ForCausalLM
+# from .deepseekv3.modeling_deepseek_v3 import DeepseekV3ForCausalLM
+from transformers import AutoConfig, MixtralForCausalLM
 
 try:
     from moe_gen.core_engine import Parameter_Server
@@ -40,20 +38,22 @@ except ImportError:
     from moe_gen.models.engine_loader import core_engine
 
 
-class DeepSeek_Parameter_Server:
+class Mixtral_Parameter_Server:
     def __init__(self, huggingface_ckpt_name, cache_dir, pt_ckpt_dir):
         self.cache_dir = cache_dir
         self.huggingface_ckpt_name = huggingface_ckpt_name
         self.pt_ckpt_dir = pt_ckpt_dir
         self.weight_copy_task = {}
         self.state_dict_name_map = {}
-        config_cls = (
-            DeepseekV2Config
-            if "V2" in huggingface_ckpt_name
-            else DeepseekV3Config
-        )
-        self.hf_model_config = config_cls.from_pretrained(
-            huggingface_ckpt_name, trust_remote_code=True
+        # config_cls = DeepseekV2Config if "V2" in huggingface_ckpt_name else DeepseekV3Config
+        # Get hf_token from env
+        hf_token = os.getenv("HF_TOKEN")
+        if hf_token is None:
+            raise ValueError(
+                "Please set HF_TOKEN in environment variable to use Mixtral models"
+            )
+        self.hf_model_config = AutoConfig.from_pretrained(
+            huggingface_ckpt_name, token=hf_token
         )
 
         # self.hf_model_config = AutoConfig.from_pretrained(huggingface_ckpt_name, cache_dir=cache_dir, trust_remote_code=True)
@@ -62,13 +62,10 @@ class DeepSeek_Parameter_Server:
         self._save_safetensors_to_pt()
         self._parse_state_dict()
         self.parameter_server = Parameter_Server()
-        if self.hf_model_config.architectures[0] == "DeepseekV2ForCausalLM":
-            if "DeepSeek-V2-Lite" in self.huggingface_ckpt_name:
-                byte_size = 32 * 1024 * 1024 * 1024
-            else:
-                byte_size = 236 * 1024 * 1024 * 1024 * 2
-        elif self.hf_model_config.architectures[0] == "DeepseekV3ForCausalLM":
-            byte_size = 690 * 1024 * 1024 * 1024
+        if "8x7B" in self.huggingface_ckpt_name:
+            byte_size = 48 * 1024 * 1024 * 1024 * 2
+        elif "8x22B" in self.huggingface_ckpt_name:
+            byte_size = 143 * 1024 * 1024 * 1024 * 2
         else:
             raise ValueError("Unknown huggingface model card")
 
@@ -100,17 +97,12 @@ class DeepSeek_Parameter_Server:
 
     def _parse_state_dict(self):
         self.hf_model_config._attn_implementation = "eager"
-        if self.hf_model_config.architectures[0] == "DeepseekV2ForCausalLM":
-            model = DeepseekV2ForCausalLM._from_config(self.hf_model_config)
-        elif self.hf_model_config.architectures[0] == "DeepseekV3ForCausalLM":
-            model = DeepseekV3ForCausalLM._from_config(self.hf_model_config)
-        else:
-            raise ValueError("Unknown model architecture")
+        model = MixtralForCausalLM._from_config(self.hf_model_config)
         model.eval()
 
         self.weight_copy_task["attn"] = []
         self.weight_copy_task["routed_expert"] = []
-        self.weight_copy_task["shared_expert"] = []
+        # self.weight_copy_task["shared_expert"] = []
 
         for layer_idx in trange(
             len(model.model.layers), desc="Parsing state_dict"
@@ -127,53 +119,32 @@ class DeepSeek_Parameter_Server:
                 }
             self.weight_copy_task["attn"].append("attn_" + str(layer_idx))
 
-            if layer_idx >= self.hf_model_config.first_k_dense_replace:
-                for name, _ in model.model.layers[
-                    layer_idx
-                ].mlp.shared_experts.named_parameters():
+            for expert_idx in range(
+                len(model.model.layers[layer_idx].block_sparse_moe.experts)
+            ):
+                for name, _ in (
+                    model.model.layers[layer_idx]
+                    .block_sparse_moe.experts[expert_idx]
+                    .named_parameters()
+                ):
                     tensor_full_name = (
                         "model.layers."
                         + str(layer_idx)
-                        + ".mlp.shared_experts."
+                        + ".block_sparse_moe.experts."
+                        + str(expert_idx)
+                        + "."
                         + name
                     )
                     self.state_dict_name_map[tensor_full_name] = {
-                        "module_key": "shared_expert_" + str(layer_idx),
-                        "tensor_key": name,
-                    }
-                self.weight_copy_task["shared_expert"].append(
-                    "shared_expert_" + str(layer_idx)
-                )
-
-                for expert_idx in range(
-                    len(model.model.layers[layer_idx].mlp.experts)
-                ):
-                    for name, _ in (
-                        model.model.layers[layer_idx]
-                        .mlp.experts[expert_idx]
-                        .named_parameters()
-                    ):
-                        tensor_full_name = (
-                            "model.layers."
-                            + str(layer_idx)
-                            + ".mlp.experts."
-                            + str(expert_idx)
-                            + "."
-                            + name
-                        )
-                        self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": "routed_expert_"
-                            + str(layer_idx)
-                            + "_"
-                            + str(expert_idx),
-                            "tensor_key": name,
-                        }
-                    self.weight_copy_task["routed_expert"].append(
-                        "routed_expert_"
+                        "module_key": "routed_expert_"
                         + str(layer_idx)
                         + "_"
-                        + str(expert_idx)
-                    )
+                        + str(expert_idx),
+                        "tensor_key": name,
+                    }
+                self.weight_copy_task["routed_expert"].append(
+                    "routed_expert_" + str(layer_idx) + "_" + str(expert_idx)
+                )
 
     def save_and_load(self, file_path, save_dir):
         tensor_dict = load_file(file_path)

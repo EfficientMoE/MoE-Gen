@@ -63,7 +63,7 @@ struct cpu_compute_task {
     cpu_compute_task(std::vector<int64_t> query_global_idx,
                      torch::Tensor attention_weights)
         : query_global_idx(query_global_idx),
-          attention_weights(attention_weights){};
+          attention_weights(attention_weights) {};
 };
 
 struct micro_batch {

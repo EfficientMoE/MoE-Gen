@@ -47,6 +47,14 @@ try:
 except ImportError:
     # jit compile
     from core_engine import Parameter_Server
+from typing import Tuple
+
+try:
+    import deep_gemm
+    from deep_gemm import get_col_major_tma_aligned_tensor
+except ImportError:
+    pass
+
 from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 
 # current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,8 +64,6 @@ from .modeling_deepseek_v3 import (
     apply_rotary_pos_emb,
     rotate_half,
 )
-import deep_gemm
-from typing import Tuple
 
 
 def rotary_pos_emb(t, cos, sin, position_ids, unsqueeze_dim=1):
@@ -177,29 +183,37 @@ def per_token_cast_to_fp8(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     m, n = x.shape
     x_view = x.view(m, -1, 128)
     x_amax = x_view.abs().float().amax(dim=2).view(m, -1).clamp(1e-4)
-    return (x_view * (448.0 / x_amax.unsqueeze(2))).to(torch.float8_e4m3fn).view(m, n), (x_amax / 448.0).view(m, -1)
+    return (x_view * (448.0 / x_amax.unsqueeze(2))).to(
+        torch.float8_e4m3fn
+    ).view(m, n), (x_amax / 448.0).view(m, -1)
 
 
 def per_block_cast_to_fp8(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.dim() == 2
     m, n = x.shape
-    x_padded = torch.zeros((ceil_div(m, 128) * 128, ceil_div(n, 128) * 128), dtype=x.dtype, device=x.device)
+    x_padded = torch.zeros(
+        (ceil_div(m, 128) * 128, ceil_div(n, 128) * 128),
+        dtype=x.dtype,
+        device=x.device,
+    )
     x_padded[:m, :n] = x
     x_view = x_padded.view(-1, 128, x_padded.size(1) // 128, 128)
     x_amax = x_view.abs().float().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
     x_scaled = (x_view * (448.0 / x_amax)).to(torch.float8_e4m3fn)
-    return x_scaled.view_as(x_padded)[:m, :n].contiguous(), (x_amax / 448.0).view(x_view.size(0), x_view.size(2))
+    return x_scaled.view_as(x_padded)[:m, :n].contiguous(), (
+        x_amax / 448.0
+    ).view(x_view.size(0), x_view.size(2))
 
 
 def w8a16_gemm(
     weight_data_fp8: torch.Tensor,
     weight_scale_inv_fp32: torch.Tensor,
-    activation_bf16: torch.Tensor
+    activation_bf16: torch.Tensor,
 ) -> torch.Tensor:
     """
-        activation_bf16: [n_group, m, k]
-        weight_data_fp8: [m, n]
-        weight_scale_inv_fp32: [m, n]
+    activation_bf16: [n_group, m, k]
+    weight_data_fp8: [m, n]
+    weight_scale_inv_fp32: [m, n]
     """
     assert weight_data_fp8.dim() == 2
     assert activation_bf16.dim() == 3
@@ -227,21 +241,45 @@ def attn_fp8(
     bsz, num_heads, q_len, q_head_dim = Q_bf16.size()
     _, _, kv_seq_len, _ = K_bf16.size()
     _, _, _, v_head_dim = V_bf16.size()
-    Q_bf16 = Q_bf16.view(bsz*num_heads, q_len, q_head_dim)
-    K_bf16 = K_bf16.view(bsz*num_heads, kv_seq_len, q_head_dim)
-    V_bf16 = V_bf16.view(bsz*num_heads, kv_seq_len, v_head_dim)
+    Q_bf16 = Q_bf16.view(bsz * num_heads, q_len, q_head_dim)
+    K_bf16 = K_bf16.view(bsz * num_heads, kv_seq_len, q_head_dim)
+    V_bf16 = V_bf16.view(bsz * num_heads, kv_seq_len, v_head_dim)
 
     # QKT
-    Q_fp8 = (torch.empty_like(Q_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, q_len, q_head_dim // 128), device=Q_bf16.device, dtype=torch.float))
-    K_fp8 = (torch.empty_like(K_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, kv_seq_len, q_head_dim // 128), device=K_bf16.device, dtype=torch.float))
-    attn_weights = torch.empty((bsz*num_heads, q_len, kv_seq_len), device=Q_bf16.device, dtype=torch.bfloat16)
-    for i in range(bsz*num_heads):
+    Q_fp8 = (
+        torch.empty_like(Q_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, q_len, q_head_dim // 128),
+            device=Q_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    K_fp8 = (
+        torch.empty_like(K_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, kv_seq_len, q_head_dim // 128),
+            device=K_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_weights = torch.empty(
+        (bsz * num_heads, q_len, kv_seq_len),
+        device=Q_bf16.device,
+        dtype=torch.bfloat16,
+    )
+    for i in range(bsz * num_heads):
         Q_fp8[0][i], Q_fp8[1][i] = per_token_cast_to_fp8(Q_bf16[i])
         K_fp8[0][i], K_fp8[1][i] = per_block_cast_to_fp8(K_bf16[i])
     K_fp8 = (K_fp8[0], get_col_major_tma_aligned_tensor(K_fp8[1]))
-    m_indices = torch.arange(0, num_groups, device=Q_bf16.device, dtype=torch.int)
-    m_indices = m_indices.unsqueeze(-1).expand(num_groups, m).contiguous().view(-1)
-    deep_gemm.m_grouped_gemm_fp8_fp8_bf16_nt_contiguous(Q_fp8, K_fp8, attn_weights, m_indices)
+    m_indices = torch.arange(
+        0, num_groups, device=Q_bf16.device, dtype=torch.int
+    )
+    m_indices = (
+        m_indices.unsqueeze(-1).expand(num_groups, m).contiguous().view(-1)
+    )
+    deep_gemm.m_grouped_gemm_fp8_fp8_bf16_nt_contiguous(
+        Q_fp8, K_fp8, attn_weights, m_indices
+    )
 
     attn_weights = attn_weights + attention_mask
     attn_weights = nn.functional.softmax(
@@ -249,18 +287,37 @@ def attn_fp8(
     ).to(Q_bf16.dtype)
 
     # A@V
-    V_fp8 = (torch.empty_like(V_bf16, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, kv_seq_len, v_head_dim // 128), device=V_bf16.device, dtype=torch.float))
-    attn_weights_fp8 = (torch.empty_like(attn_weights, dtype=torch.float8_e4m3fn), torch.empty((bsz*num_heads, q_len, kv_seq_len // 128), device=attn_weights.device, dtype=torch.float))
-    attn_output = torch.empty((bsz*num_heads, q_len, v_head_dim), device=Q_bf16.device, dtype=torch.bfloat16)
-    for i in range(bsz*num_heads):
+    V_fp8 = (
+        torch.empty_like(V_bf16, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, kv_seq_len, v_head_dim // 128),
+            device=V_bf16.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_weights_fp8 = (
+        torch.empty_like(attn_weights, dtype=torch.float8_e4m3fn),
+        torch.empty(
+            (bsz * num_heads, q_len, kv_seq_len // 128),
+            device=attn_weights.device,
+            dtype=torch.float,
+        ),
+    )
+    attn_output = torch.empty(
+        (bsz * num_heads, q_len, v_head_dim),
+        device=Q_bf16.device,
+        dtype=torch.bfloat16,
+    )
+    for i in range(bsz * num_heads):
         V_fp8[0][i], V_fp8[1][i] = per_token_cast_to_fp8(V_bf16[i])
-        attn_weights_fp8[0][i], attn_weights_fp8[1][i] = per_block_cast_to_fp8(attn_weights[i])
+        attn_weights_fp8[0][i], attn_weights_fp8[1][i] = per_block_cast_to_fp8(
+            attn_weights[i]
+        )
     V_fp8 = (V_fp8[0], get_col_major_tma_aligned_tensor(V_fp8[1]))
     deep_gemm.gemm_fp8_fp8_bf16_nt(V_fp8, attn_weights_fp8, attn_output)
 
     attn_output = attn_output.view(bsz, num_heads, q_len, v_head_dim)
     return attn_output
-
 
 
 @torch.no_grad()
@@ -269,18 +326,36 @@ def prefill_attn_fp8(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
     position_ids: torch.Tensor,
-    weight_dequant_scale: dict
+    weight_dequant_scale: dict,
 ):
     bsz, q_len, _ = hidden_states.size()
     if self.q_lora_rank is None:
-        q = w8a16_gemm(self.q_proj.weight.data, weight_dequant_scale['q_proj.weight_scale_inv'], hidden_states)
+        q = w8a16_gemm(
+            self.q_proj.weight.data,
+            weight_dequant_scale["q_proj.weight_scale_inv"],
+            hidden_states,
+        )
     else:
-        q = w8a16_gemm(self.q_b_proj.weight.data, weight_dequant_scale['q_b_proj.weight_scale_inv'], self.q_a_layernorm(w8a16_gemm(self.q_a_proj.weight.data, weight_dequant_scale['q_a_proj.weight_scale_inv'], hidden_states)))
+        q = w8a16_gemm(
+            self.q_b_proj.weight.data,
+            weight_dequant_scale["q_b_proj.weight_scale_inv"],
+            self.q_a_layernorm(
+                w8a16_gemm(
+                    self.q_a_proj.weight.data,
+                    weight_dequant_scale["q_a_proj.weight_scale_inv"],
+                    hidden_states,
+                )
+            ),
+        )
     q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
     q_nope, q_pe = torch.split(
         q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
     )
-    compressed_kv = w8a16_gemm(self.kv_a_proj_with_mqa.weight.data, weight_dequant_scale['kv_a_proj_with_mqa.weight_scale_inv'], hidden_states)
+    compressed_kv = w8a16_gemm(
+        self.kv_a_proj_with_mqa.weight.data,
+        weight_dequant_scale["kv_a_proj_with_mqa.weight_scale_inv"],
+        hidden_states,
+    )
     new_compressed_kv = compressed_kv.clone()
     kv_len = compressed_kv.size(1)
     assert kv_len == attention_mask.size(-1)
@@ -288,14 +363,18 @@ def prefill_attn_fp8(
         compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
     )
     k_pe = k_pe.view(bsz, kv_len, 1, self.qk_rope_head_dim).transpose(1, 2)
-    kv = w8a16_gemm(self.kv_b_proj.weight.data, weight_dequant_scale['kv_b_proj.weight_scale_inv'], self.kv_a_layernorm(compressed_kv))
+    kv = w8a16_gemm(
+        self.kv_b_proj.weight.data,
+        weight_dequant_scale["kv_b_proj.weight_scale_inv"],
+        self.kv_a_layernorm(compressed_kv),
+    )
     kv = kv.view(
         bsz, kv_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim
     ).transpose(1, 2)
     k_nope, value_states = torch.split(
         kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
     )
-    
+
     kv_seq_len = attention_mask.shape[-1]
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
     q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
@@ -308,7 +387,7 @@ def prefill_attn_fp8(
         bsz, self.num_heads, kv_seq_len, self.q_head_dim
     )
     key_states[:, :, :, : self.qk_nope_head_dim] = k_nope
-    key_states[:, :, :, self.qk_nope_head_dim :] = k_pe   
+    key_states[:, :, :, self.qk_nope_head_dim :] = k_pe
 
     attn_output = attn_fp8(query_states, key_states, value_states)
 
@@ -316,10 +395,12 @@ def prefill_attn_fp8(
     attn_output = attn_output.reshape(
         bsz, q_len, self.num_heads * self.v_head_dim
     )
-    attn_output = w8a16_gemm(self.o_proj.weight.data, weight_dequant_scale['o_proj.weight_scale_inv'], attn_output)
+    attn_output = w8a16_gemm(
+        self.o_proj.weight.data,
+        weight_dequant_scale["o_proj.weight_scale_inv"],
+        attn_output,
+    )
     return attn_output, new_compressed_kv
-
-
 
 
 @torch.no_grad()
@@ -617,173 +698,6 @@ def weight_dequant(
     return y
 
 
-class DeepSeek_Parameter_Server:
-    def __init__(self, huggingface_ckpt_name, cache_dir, pt_ckpt_dir):
-        self.cache_dir = cache_dir
-        self.huggingface_ckpt_name = huggingface_ckpt_name
-        self.pt_ckpt_dir = pt_ckpt_dir
-        self.weight_copy_task = {}
-        self.state_dict_name_map = {}
-        self.hf_model_config = AutoConfig.from_pretrained(
-            huggingface_ckpt_name, cache_dir=cache_dir, trust_remote_code=True
-        )
-
-    def Init(self):
-        self._save_safetensors_to_pt()
-        self._parse_state_dict()
-        self.parameter_server = Parameter_Server()
-        byte_size = 690 * 1024 * 1024 * 1024
-        import uuid
-
-        self.shm_name = "/shm_" + str(uuid.uuid4())
-        self.tensor_meta_shm_name = "/shm_" + str(uuid.uuid4())
-        logging.info(f"Model parameters shared memory name: {self.shm_name}")
-        logging.info(
-            f"Tensor meta shared memory name: {self.tensor_meta_shm_name}"
-        )
-        logging.info(f"Byte size: {byte_size}")
-        self.parameter_server.Init(
-            self.shm_name,
-            self.tensor_meta_shm_name,
-            byte_size,
-            self.pt_ckpt_dir,
-            self.state_dict_name_map,
-        )
-        return self.shm_name, self.tensor_meta_shm_name
-
-    def _parse_state_dict(self):
-        self.hf_model_config._attn_implementation = "eager"
-        model = DeepseekV3ForCausalLM._from_config(self.hf_model_config)
-        model.eval()
-
-        self.weight_copy_task["attn"] = []
-        self.weight_copy_task["routed_expert"] = []
-        self.weight_copy_task["shared_expert"] = []
-
-        for layer_idx in trange(
-            len(model.model.layers), desc="Parsing state_dict"
-        ):
-            for name, _ in model.model.layers[
-                layer_idx
-            ].self_attn.named_parameters():
-                tensor_full_name = (
-                    "model.layers." + str(layer_idx) + ".self_attn." + name
-                )
-                self.state_dict_name_map[tensor_full_name] = {
-                    "module_key": "attn_" + str(layer_idx),
-                    "tensor_key": name,
-                }
-            self.weight_copy_task["attn"].append("attn_" + str(layer_idx))
-
-            if layer_idx >= self.hf_model_config.first_k_dense_replace:
-                for name, _ in model.model.layers[
-                    layer_idx
-                ].mlp.shared_experts.named_parameters():
-                    tensor_full_name = (
-                        "model.layers."
-                        + str(layer_idx)
-                        + ".mlp.shared_experts."
-                        + name
-                    )
-                    self.state_dict_name_map[tensor_full_name] = {
-                        "module_key": "shared_expert_" + str(layer_idx),
-                        "tensor_key": name,
-                    }
-                self.weight_copy_task["shared_expert"].append(
-                    "shared_expert_" + str(layer_idx)
-                )
-
-                for expert_idx in range(
-                    len(model.model.layers[layer_idx].mlp.experts)
-                ):
-                    for name, _ in (
-                        model.model.layers[layer_idx]
-                        .mlp.experts[expert_idx]
-                        .named_parameters()
-                    ):
-                        tensor_full_name = (
-                            "model.layers."
-                            + str(layer_idx)
-                            + ".mlp.experts."
-                            + str(expert_idx)
-                            + "."
-                            + name
-                        )
-                        self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": "routed_expert_"
-                            + str(layer_idx)
-                            + "_"
-                            + str(expert_idx),
-                            "tensor_key": name,
-                        }
-                    self.weight_copy_task["routed_expert"].append(
-                        "routed_expert_"
-                        + str(layer_idx)
-                        + "_"
-                        + str(expert_idx)
-                    )
-
-    def save_and_load(self, file_path, save_dir):
-        tensor_dict = load_file(file_path)
-        torch.save(tensor_dict, save_dir)
-        return tensor_dict
-
-    def _save_safetensors_to_pt(self):
-        logging.info(f"cache_dir: {self.cache_dir}")
-        ckpt_files = os.listdir(self.cache_dir)
-        ckpt_files = [
-            os.path.join(self.cache_dir, ckpt)
-            for ckpt in ckpt_files
-            if ckpt.endswith(".safetensors")
-        ]
-        # logging.info(f"ckpt_files: {ckpt_files}")
-        processes = []
-        for ckpt in tqdm(
-            ckpt_files, desc="Loading checkpoint files", smoothing=0
-        ):
-            dst_dir = os.path.join(
-                self.pt_ckpt_dir,
-                ckpt.split("/")[-1].replace(".safetensors", ".pt"),
-            )
-            # logging.info(f"dst_dir: {dst_dir}")
-            if os.path.exists(dst_dir):
-                continue
-
-            p = Process(target=self.save_and_load, args=(ckpt, dst_dir))
-            p.start()
-            processes.append(p)
-
-        for p in processes:
-            p.join()
-            p.close()
-        logging.info("All safetensor loader processes joined")
-
-        # TODO:
-        # if self.cache_dir is None:
-        # 	from transformers import TRANSFORMERS_CACHE
-        # 	self.cache_dir = TRANSFORMERS_CACHE
-        # 	model_cache_dirs = os.listdir(self.cache_dir)
-        # 	if "models--deepseek-ai-" + self.huggingface_ckpt_name not in model_cache_dirs:
-        # 		tmp = DeepseekV2ForCausalLM.from_pretrained(self.huggingface_ckpt_name, torch_dtype="auto", trust_remote_code=True)
-        # 		del tmp
-        # 		gc.collect()
-        # 	parameter_ckpt_dir = os.path.join(self.cache_dir, "models--deepseek-ai-" + self.huggingface_ckpt_name)
-        # 	parameter_ckpt_dir = os.path.join(parameter_ckpt_dir, "snapshots")
-        # 	parameter_ckpt_dir = os.listdir(parameter_ckpt_dir)[0]
-        # 	ckpt_files = os.listdir(parameter_ckpt_dir)
-        # 	ckpt_files = [os.path.join(parameter_ckpt_dir, ckpt) for ckpt in ckpt_files]
-
-        # 	for ckpt in tqdm(
-        # 		ckpt_files, desc="Loading checkpoint files", smoothing=0
-        # 	):
-        # 		tmp_state_dict = {}
-        # 		if ckpt.endswith(".safetensors"):
-        # 			with safe_open(ckpt, framework="pt", device="cpu") as f:
-        # 				for k in f.keys():
-        # 					tmp_state_dict[k] = f.get_tensor(k)
-        # 			torch.save(tmp_state_dict, os.path.join(self.cus_ckpt_dir, ckpt.split("/")[-1].replace(".safetensors", ".pt")))
-
-
 class DeepSeek_Initializer:
     def __init__(
         self,
@@ -1000,30 +914,6 @@ class DeepSeek_Initializer:
             p.join()
             p.close()
         logging.info("All safetensor loader processes joined")
-        # TODO:
-        # if self.cache_dir is None:
-        # 	from transformers import TRANSFORMERS_CACHE
-        # 	self.cache_dir = TRANSFORMERS_CACHE
-        # 	model_cache_dirs = os.listdir(self.cache_dir)
-        # 	if "models--deepseek-ai-" + self.huggingface_ckpt_name not in model_cache_dirs:
-        # 		tmp = DeepseekV2ForCausalLM.from_pretrained(self.huggingface_ckpt_name, torch_dtype="auto", trust_remote_code=True)
-        # 		del tmp
-        # 		gc.collect()
-        # 	parameter_ckpt_dir = os.path.join(self.cache_dir, "models--deepseek-ai-" + self.huggingface_ckpt_name)
-        # 	parameter_ckpt_dir = os.path.join(parameter_ckpt_dir, "snapshots")
-        # 	parameter_ckpt_dir = os.listdir(parameter_ckpt_dir)[0]
-        # 	ckpt_files = os.listdir(parameter_ckpt_dir)
-        # 	ckpt_files = [os.path.join(parameter_ckpt_dir, ckpt) for ckpt in ckpt_files]
-
-        # 	for ckpt in tqdm(
-        # 		ckpt_files, desc="Loading checkpoint files", smoothing=0
-        # 	):
-        # 		tmp_state_dict = {}
-        # 		if ckpt.endswith(".safetensors"):
-        # 			with safe_open(ckpt, framework="pt", device="cpu") as f:
-        # 				for k in f.keys():
-        # 					tmp_state_dict[k] = f.get_tensor(k)
-        # 			torch.save(tmp_state_dict, os.path.join(self.cus_ckpt_dir, ckpt.split("/")[-1].replace(".safetensors", ".pt")))
 
     def _extract_dequantize_scale(self):
         self.dequant_scale = {}

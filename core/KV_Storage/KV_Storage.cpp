@@ -72,6 +72,8 @@ KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
                 // void* v_ptr = nullptr;
                 CUDA_CHECK(cudaHostAlloc(&k_ptr, per_layer_storage_size,
                                          cudaHostAllocDefault));
+                // memset
+                CUDA_CHECK(cudaMemset(k_ptr, 999, per_layer_storage_size));
                 // CUDA_CHECK(cudaHostAlloc(&v_ptr, per_layer_storage_size,
                 // cudaHostAllocDefault)); memset(k_ptr, 0,
                 // per_layer_storage_size);
@@ -157,8 +159,6 @@ void KV_Storage::Init() {
                 }
             }
         }
-        // this->logger_->debug("k_storage[1999][0].start_ptr:
-        // {}",this->k_storage[1999][0].start_ptr);
         this->logger_->debug("KV_Storage Initialized.");
     } catch (const c10::Error& e) {
         this->logger_->debug("KV_Storage: CUDA/PyTorch error: {}", e.what());
