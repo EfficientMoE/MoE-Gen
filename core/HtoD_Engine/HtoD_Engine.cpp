@@ -269,6 +269,7 @@ void HtoD_Engine::HtoD_Worker() {
 };
 
 void HtoD_Engine::clear_kv_copy_queue() {
+    CUDA_CHECK(cudaSetDevice(this->engine_config_.basic_config.device));
     try {
         while (!this->kv_copy_task_queue_.empty()) {
             std::tuple<std::vector<int64_t>, int64_t, int64_t, int64_t> task;
@@ -277,21 +278,18 @@ void HtoD_Engine::clear_kv_copy_queue() {
     } catch (...) {
         this->logger_->error("Failed to clear kv_copy_queue.");
     }
+    CUDA_CHECK(cudaStreamSynchronize(this->HtoD_stream));
 };
 
 void HtoD_Engine::clear_weight_copy_queue() {
-    // for(auto& [module_type, queue]: this->weights_copy_task_queue_){
-    // 	while(!queue.empty()){
-    // 		std::string module_name;
-    // 		queue.wait_and_pop(module_name);
-    // 	}
-    // }
+    CUDA_CHECK(cudaSetDevice(this->engine_config_.basic_config.device));
     std::lock_guard<std::mutex> lock(this->mutex_);
     for (auto& [module_type, queue] : this->weights_copy_task_queue_) {
         while (!queue.empty()) {
             queue.clear();
         }
     }
+    CUDA_CHECK(cudaStreamSynchronize(this->HtoD_stream));
 }
 
 void HtoD_Engine::reset_weight_copy_queue() {

@@ -525,7 +525,7 @@ class Mixtral_Initializer:
 
     def _parse_model_config(self):
         model_config = ModelConfig()
-        if "mistralai/Mixtral-8x7B" in self.hf_model_config._name_or_path:
+        if "8x7B" in self.hf_model_config._name_or_path:
             model_config.model_type = "mixtral"
             model_config.num_hidden_layers = 32
             model_config.num_local_experts = 8
@@ -535,7 +535,7 @@ class Mixtral_Initializer:
             model_config.intermediate_size = 14336
             model_config.head_dim = 128
 
-        elif "mistralai/Mixtral-8x22B" in self.hf_model_config._name_or_path:
+        elif "8x22B" in self.hf_model_config._name_or_path:
             model_config.model_type = "mixtral"
             model_config.num_hidden_layers = 56
             model_config.num_local_experts = 8

@@ -679,13 +679,10 @@ class MoE_Gen:
         """
         self.set_phase("prefill")
         self.core_engine.clear_weight_copy_queue()
-        # logging.info("Weight copy queue cleared.")
-        time.sleep(1)
+        # time.sleep(1)
         self.core_engine.reset_prefill_buffer()
-        # logging.info("Prefill buffer reset.")
-        time.sleep(1)
+        # time.sleep(1)
         self.core_engine.reset_weight_copy_queue()
-        # logging.info("Weight copy queue reset.")
 
         logging.info("Weight buffer cleared.")
         if "deepseek" in self.model_config.model_type:
@@ -787,7 +784,6 @@ class MoE_Gen:
         self.set_phase("decoding")
         self.core_engine.clear_kv_copy_queue()
         logging.debug("KV copy queue cleared.")
-        time.sleep(1)
         self.core_engine.clear_kv_buffer()
         logging.debug("KV buffer cleared.")
         if "deepseek" in self.model_config.model_type:
@@ -809,7 +805,7 @@ class MoE_Gen:
                     logging.info(
                         f"CPU compute ratio not set. Default setting applied."
                     )
-                    w = 0.5
+                    w = 0.6
                 logging.info(f"Split ratio: {w}")
 
             if RUNTIME_ATTN_MODE == 0:
