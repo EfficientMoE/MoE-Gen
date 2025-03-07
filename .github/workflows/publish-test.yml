@@ -77,8 +77,8 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install --no-build-isolation -r requirements.txt
-          pip install flash_attn
+          pip install -m --no-build-isolation -r requirements.txt
+          pip install -m --no-build-isolation flash_attn
           pip install build
           VERSION_HASH=$(cat artifact/version.txt)
           MOEGEN_VERSION=0.0.1dev${VERSION_HASH} BUILD_OPS=1 python -m build --wheel
