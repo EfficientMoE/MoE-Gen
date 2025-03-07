@@ -49,7 +49,11 @@ except ImportError:
     from core_engine import Parameter_Server
 from typing import Tuple
 
-import deep_gemm
+try:
+    import deep_gemm
+    from deep_gemm import get_col_major_tma_aligned_tensor
+except ImportError:
+    pass
 
 from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 
@@ -910,7 +914,7 @@ class DeepSeek_Initializer:
             p.join()
             p.close()
         logging.info("All safetensor loader processes joined")
-        
+
     def _extract_dequantize_scale(self):
         self.dequant_scale = {}
         for key, param in self.skeleton_state_dict.items():

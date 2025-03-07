@@ -96,5 +96,4 @@ class Hetero_Attn {
         int64_t layer_idx, torch::Tensor query_states,
         torch::Tensor& key_states, torch::Tensor& value_states,
         torch::Tensor& attention_mask, std::vector<int64_t> cur_batch);
-
 };
