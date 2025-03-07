@@ -37,12 +37,15 @@ if __name__ == "__main__":
         2. DeepSeek-V3 Architecture:
             * deepseek-ai/DeepSeek-R1
             * deepseek-ai/DeepSeek-V3
+        3. Mixtral:
+            * mistralai/Mixtral-8x7B-Instruct-v0.1
+            * mistralai/Mixtral-8x22B-Instruct-v0.1
     """
 
     """
         Step 1: Select Model.
     """
-    hugging_face_checkpoint = "deepseek-ai/DeepSeek-V2-Lite-Chat"
+    hugging_face_checkpoint = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 
     """
         Step 2: Load dataset and apply chat template(prompt engineering).
@@ -70,14 +73,18 @@ if __name__ == "__main__":
 
     """
         Step 3: Launch MoE-Gen
+
+        Set attetion mode: 0 for CPU, 1 for GPU, 2 for hybrid
+        e.g. os.environ["ATTN_MODE"] = "1"
     """
+    os.environ["ATTN_MODE"] = "1"
     answer_set = moe_gen(
         huggingface_ckpt_name=hugging_face_checkpoint,
         queries=queries,
         max_input_length=512,
-        max_decoding_length=32,
+        max_decoding_length=256,
         device=[0],
-        host_kv_cache_size=10,
+        host_kv_cache_size=100,
     )
 
     """

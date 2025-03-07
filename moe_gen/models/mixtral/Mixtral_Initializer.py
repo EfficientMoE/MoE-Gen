@@ -21,6 +21,7 @@ import math
 import os
 import time
 import types
+from multiprocessing import Process
 from typing import Optional
 
 import torch
@@ -33,8 +34,15 @@ from transformers.models.mixtral.modeling_mixtral import (
     repeat_kv,
 )
 
-from moe_gen.core_engine import MoE_Gen as core_engine
-from moe_gen.engine import EngineConfig, ModelConfig
+try:
+    from moe_gen.core_engine import MoE_Gen as core_engine
+except ImportError:
+    # jit compile
+    from core_engine import MoE_Gen as core_engine
+from safetensors.torch import load_file
+from tqdm import trange
+
+from moe_gen.config import EngineConfig, ModelConfig
 from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 
 
@@ -230,10 +238,21 @@ class Mixtral_Initializer:
         hf_cache_dir: str,
         cache_dir: Optional[str],
         engine_config: EngineConfig,
+        skeleton_state_dict: dict = None,
+        shm_name: str = None,
+        tensor_meta_shm_name: str = None,
+        pt_ckpt_dir: str = None,
+        host_kv_cache_size: int = 0,
     ):
         self.huggingface_ckpt_name = huggingface_ckpt_name
+        self.hf_cache_dir = hf_cache_dir
         self.cache_dir = cache_dir
         self.engine_config = engine_config
+        self.skeleton_state_dict = skeleton_state_dict
+        self.shm_name = shm_name
+        self.tensor_meta_shm_name = tensor_meta_shm_name
+        self.host_kv_cache_size = host_kv_cache_size
+        self.host_kv_cache_byte_size = host_kv_cache_size * 1024 * 1024 * 1024
 
         self.model = None
         self.hf_model_config = AutoConfig.from_pretrained(
@@ -241,56 +260,132 @@ class Mixtral_Initializer:
             cache_dir=hf_cache_dir,
             trust_remote_code=True,
         )
-        # TODO:
+
         self.model_config = self._parse_model_config()
         self._default_engine_config()
         self.state_dict_name_map = {}
         self.weight_copy_task = {}
-        self.pt_ckpt_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            self.huggingface_ckpt_name,
-        )
+
+        # Use provided pt_ckpt_dir or create default one
+        if pt_ckpt_dir:
+            self.pt_ckpt_dir = pt_ckpt_dir
+        else:
+            self.pt_ckpt_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                self.huggingface_ckpt_name,
+            )
+
         if not os.path.exists(self.pt_ckpt_dir):
             os.makedirs(self.pt_ckpt_dir)
 
     def _default_engine_config(self):
-        if "mistralai/Mixtral-8x7B" in self.hf_model_config._name_or_path:
-            self.engine_config.Module_Batching_Config.prefill_micro_batch_size = 50
-            self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = 64
-            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 8192
-            self.engine_config.Module_Batching_Config.expert_decoding_batch_size_upper_bound = 8192
+        props = torch.cuda.get_device_properties(
+            self.engine_config.Basic_Config.device
+        )
+        total_memory = props.total_memory / (1024**3)
+        logging.info(f"Current device total memory: {total_memory} GB")
 
+        if "8x7B" in self.hf_model_config._name_or_path:
             self.engine_config.Basic_Config.log_level = "info"
-            # self.engine_config.Basic_Config.device = 7
             self.engine_config.Basic_Config.torch_dtype = torch.bfloat16
             self.engine_config.Basic_Config.dtype_str = "bfloat16"
-            # self.engine_config.Basic_Config.device_torch = torch.device(f"cuda:{self.engine_config.Basic_Config.device}")
-            mode = int(os.getenv("ATTN_MODE", 0))
-            logging.info(f"Attention mode: {mode}")
+            # Get mode from env var
+            mode = os.getenv("ATTN_MODE", "1")
+            mode = int(mode)
             self.engine_config.Basic_Config.attn_mode = mode
             self.engine_config.Basic_Config.module_types = [
                 "attn",
                 "routed_expert",
             ]
-            self.engine_config.Basic_Config.num_threads = 25
-            # self.engine_config.Basic_Config.max_decoding_length = 512
-            # self.engine_config.Basic_Config.padding_length = 32
+            self.engine_config.Basic_Config.num_threads = 16
+
+            # Determine the number of host kv slots.
+            self.engine_config.KV_Storage_Config.reserved_length = (
+                self.engine_config.Basic_Config.padding_length
+                + self.engine_config.Basic_Config.max_decoding_length
+            )
+            self.engine_config.KV_Storage_Config.slot_byte_size = (
+                self.engine_config.KV_Storage_Config.reserved_length
+                * self.model_config.head_dim
+                * self.model_config.num_key_value_heads
+                * 2
+            )
+            self.engine_config.KV_Storage_Config.num_host_slots = (
+                self.host_kv_cache_byte_size
+                // self.engine_config.KV_Storage_Config.slot_byte_size
+                // self.model_config.num_hidden_layers
+            )
+            self.engine_config.KV_Storage_Config.storage_byte_size = (
+                self.host_kv_cache_byte_size
+            )
+            # logging.info(
+            #     f"KV storage byte size: {self.engine_config.KV_Storage_Config.storage_byte_size}"
+            # )
+
+            self.engine_config.Module_Batching_Config.global_batch_size = min(
+                self.engine_config.KV_Storage_Config.num_host_slots,
+                self.engine_config.Basic_Config.num_queries,
+            )
+            context_length = (
+                self.engine_config.Basic_Config.max_decoding_length
+                + self.engine_config.Basic_Config.padding_length
+            )
+            if context_length > 544:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = math.floor(
+                    200 * 544 / context_length
+                )
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = math.floor(
+                    400 * 544 / context_length
+                )
+            else:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = 200
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = 400
+            # logging.info(
+            #     f"attn_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size}"
+            # )
+            # logging.info(
+            #     f"MoE_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size}"
+            # )
+            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 2048
+
+            if context_length > 544:
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = math.floor(
+                    400 * 544 / context_length
+                )
+            else:
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = 400
+            # logging.info(
+            #     f"attn_decoding_micro_batch_size: {self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size}"
+            # )
+            self.engine_config.Module_Batching_Config.MoE_decoding_micro_batch_size = self.engine_config.Module_Batching_Config.global_batch_size
+            self.engine_config.Module_Batching_Config.expert_decoding_batch_size_upper_bound = 2048
+
+            # L40
+            if total_memory >= 47 and total_memory < 49:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 2
+            if total_memory >= 78:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 3
 
             self.engine_config.GPU_Buffer_Config.num_prefill_module_buffer = {
-                "attn": 0,
-                "routed_expert": 7,
+                "attn": 1,
+                "routed_expert": 8,
             }
             self.engine_config.GPU_Buffer_Config.num_decoding_module_buffer = {
-                "attn": 0,
-                "routed_expert": 7,
+                "attn": 1,
+                "routed_expert": 8,
             }
+
             self.engine_config.GPU_Buffer_Config.num_k_buffer = 3
             self.engine_config.GPU_Buffer_Config.num_v_buffer = 3
             self.engine_config.GPU_Buffer_Config.kv_buffer_num_tokens = (
                 self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size
                 * (
-                    self.engine_config.Basic_Config.padding_length
-                    + self.engine_config.Basic_Config.max_decoding_length
+                    self.engine_config.Basic_Config.max_decoding_length
+                    + self.engine_config.Basic_Config.padding_length
                 )
             )
             self.engine_config.GPU_Buffer_Config.module_shapes = {
@@ -307,7 +402,19 @@ class Mixtral_Initializer:
                 },
             }
 
-            # self.engine_config.KV_Storage_Config.num_host_slots = 4551
+        elif "8x22B" in self.hf_model_config._name_or_path:
+            self.engine_config.Basic_Config.log_level = "info"
+            self.engine_config.Basic_Config.torch_dtype = torch.bfloat16
+            self.engine_config.Basic_Config.dtype_str = "bfloat16"
+            mode = os.getenv("ATTN_MODE", "1")
+            mode = int(mode)
+            self.engine_config.Basic_Config.attn_mode = mode
+            self.engine_config.Basic_Config.module_types = [
+                "attn",
+                "routed_expert",
+            ]
+            self.engine_config.Basic_Config.num_threads = 16
+            # Determine the number of host kv slots.
             self.engine_config.KV_Storage_Config.reserved_length = (
                 self.engine_config.Basic_Config.padding_length
                 + self.engine_config.Basic_Config.max_decoding_length
@@ -318,49 +425,85 @@ class Mixtral_Initializer:
                 * self.model_config.num_key_value_heads
                 * 2
             )
-            self.engine_config.KV_Storage_Config.storage_byte_size = (
-                self.engine_config.KV_Storage_Config.num_host_slots
-                * self.engine_config.KV_Storage_Config.slot_byte_size
-                * self.model_config.num_hidden_layers
+            self.engine_config.KV_Storage_Config.num_host_slots = (
+                self.host_kv_cache_byte_size
+                // self.engine_config.KV_Storage_Config.slot_byte_size
+                // self.model_config.num_hidden_layers
             )
+            self.engine_config.KV_Storage_Config.storage_byte_size = (
+                self.host_kv_cache_byte_size
+            )
+            # logging.info(
+            #     f"KV storage byte size: {self.engine_config.KV_Storage_Config.storage_byte_size}"
+            # )
 
-        elif "mistralai/Mixtral-8x22B" in self.hf_model_config._name_or_path:
-            self.engine_config.Module_Batching_Config.prefill_micro_batch_size = 20
-            self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = 100
-            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 8192
-            self.engine_config.Module_Batching_Config.expert_decoding_batch_size_upper_bound = 8192
+            self.engine_config.Module_Batching_Config.global_batch_size = min(
+                self.engine_config.KV_Storage_Config.num_host_slots,
+                self.engine_config.Basic_Config.num_queries,
+            )
+            context_length = (
+                self.engine_config.Basic_Config.max_decoding_length
+                + self.engine_config.Basic_Config.padding_length
+            )
+            if context_length > 544:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = math.floor(
+                    20 * 544 / context_length
+                )
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = math.floor(
+                    60 * 544 / context_length
+                )
+            else:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = 20
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = 60
+            # logging.info(
+            #     f"attn_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size}"
+            # )
+            # logging.info(
+            #     f"MoE_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size}"
+            # )
+            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 2048
 
-            self.engine_config.Basic_Config.log_level = "info"
-            # self.engine_config.Basic_Config.device = 7
-            self.engine_config.Basic_Config.torch_dtype = torch.bfloat16
-            self.engine_config.Basic_Config.dtype_str = "bfloat16"
-            # self.engine_config.Basic_Config.device_torch = torch.device("cuda:7")
-            mode = int(os.getenv("ATTN_MODE", 0))
-            logging.info(f"Attention mode: {mode}")
-            self.engine_config.Basic_Config.attn_mode = mode
-            self.engine_config.Basic_Config.module_types = [
-                "attn",
-                "routed_expert",
-            ]
-            self.engine_config.Basic_Config.num_threads = 25
+            if context_length > 544:
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = math.floor(
+                    100 * 544 / context_length
+                )
+            else:
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = 100
+            # logging.info(
+            #     f"attn_decoding_micro_batch_size: {self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size}"
+            # )
+            self.engine_config.Module_Batching_Config.MoE_decoding_micro_batch_size = self.engine_config.Module_Batching_Config.global_batch_size
+            self.engine_config.Module_Batching_Config.expert_decoding_batch_size_upper_bound = 2048
+
+            # L40
+            if total_memory >= 47 and total_memory < 49:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 2
+            if total_memory >= 78:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 3
 
             self.engine_config.GPU_Buffer_Config.num_prefill_module_buffer = {
-                "attn": 0,
+                "attn": 1,
                 "routed_expert": 8,
             }
             self.engine_config.GPU_Buffer_Config.num_decoding_module_buffer = {
-                "attn": 0,
+                "attn": 1,
                 "routed_expert": 8,
             }
+
             self.engine_config.GPU_Buffer_Config.num_k_buffer = 3
             self.engine_config.GPU_Buffer_Config.num_v_buffer = 3
             self.engine_config.GPU_Buffer_Config.kv_buffer_num_tokens = (
                 self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size
                 * (
-                    self.engine_config.Basic_Config.padding_length
-                    + self.engine_config.Basic_Config.max_decoding_length
+                    self.engine_config.Basic_Config.max_decoding_length
+                    + self.engine_config.Basic_Config.padding_length
                 )
             )
+
             self.engine_config.GPU_Buffer_Config.module_shapes = {
                 "attn": {
                     "q_proj.weight": [6144, 6144],
@@ -375,31 +518,15 @@ class Mixtral_Initializer:
                 },
             }
 
-            # self.engine_config.KV_Storage_Config.num_host_slots = 650
-            self.engine_config.KV_Storage_Config.reserved_length = (
-                self.engine_config.Basic_Config.padding_length
-                + self.engine_config.Basic_Config.max_decoding_length
-            )
-            self.engine_config.KV_Storage_Config.slot_byte_size = (
-                self.engine_config.KV_Storage_Config.reserved_length
-                * self.model_config.head_dim
-                * self.model_config.num_key_value_heads
-                * 2
-            )
-            self.engine_config.KV_Storage_Config.storage_byte_size = (
-                self.engine_config.KV_Storage_Config.num_host_slots
-                * self.engine_config.KV_Storage_Config.slot_byte_size
-                * self.model_config.num_hidden_layers
-            )
         else:
             raise ValueError(
-                f"{self.model.config._name_or_path} not supported yet."
+                f"Model {self.hf_model_config._name_or_path} not supported yet"
             )
 
     def _parse_model_config(self):
         model_config = ModelConfig()
-        if "mistralai/Mixtral-8x7B" in self.hf_model_config._name_or_path:
-            model_config.model_type = "Mixtral"
+        if "8x7B" in self.hf_model_config._name_or_path:
+            model_config.model_type = "mixtral"
             model_config.num_hidden_layers = 32
             model_config.num_local_experts = 8
             model_config.num_attention_heads = 32
@@ -408,8 +535,8 @@ class Mixtral_Initializer:
             model_config.intermediate_size = 14336
             model_config.head_dim = 128
 
-        elif "mistralai/Mixtral-8x22B" in self.hf_model_config._name_or_path:
-            model_config.model_type = "Mixtral"
+        elif "8x22B" in self.hf_model_config._name_or_path:
+            model_config.model_type = "mixtral"
             model_config.num_hidden_layers = 56
             model_config.num_local_experts = 8
             model_config.num_attention_heads = 48
@@ -423,6 +550,21 @@ class Mixtral_Initializer:
 
         return model_config
 
+    def save_and_load(self, file_path, save_dir):
+        temp_state_dict = {}
+        filename = os.path.basename(file_path)
+        save_path = os.path.join(
+            save_dir, filename.replace(".safetensors", ".pt")
+        )
+
+        if os.path.exists(save_path):
+            logging.info(f"File {save_path} already exists, skipping")
+            return
+
+        temp_state_dict = load_file(file_path)
+        torch.save(temp_state_dict, save_path)
+        logging.info(f"Saved {file_path} to {save_path}")
+
     def _save_safetensors_to_pt(self):
         ckpt_files = os.listdir(self.cache_dir)
         ckpt_files = [
@@ -431,82 +573,68 @@ class Mixtral_Initializer:
             if ckpt.endswith(".safetensors")
         ]
 
-        from multiprocessing import Process
-
-        from safetensors.torch import load_file
-
-        def save_and_load(file_path, save_dir):
-            tensor_dict = load_file(file_path)
-            torch.save(tensor_dict, save_dir)
-            return tensor_dict
-
         processes = []
         for ckpt in tqdm(
             ckpt_files, desc="Loading checkpoint files", smoothing=0
         ):
-            dst_dir = os.path.join(
-                self.pt_ckpt_dir,
-                ckpt.split("/")[-1].replace(".safetensors", ".pt"),
+            p = Process(
+                target=self.save_and_load, args=(ckpt, self.pt_ckpt_dir)
             )
-            if os.path.exists(dst_dir):
-                continue
-
-            p = Process(target=save_and_load, args=(ckpt, dst_dir))
             p.start()
             processes.append(p)
 
         for p in processes:
             p.join()
-            p.close()
         logging.info("All safetensor loader processes joined")
-        # TODO:
-        # if self.cache_dir is None:
-        # 	from transformers import TRANSFORMERS_CACHE
-        # 	self.cache_dir = TRANSFORMERS_CACHE
-        # 	model_cache_dirs = os.listdir(self.cache_dir)
-        # 	if "models--deepseek-ai-" + self.huggingface_ckpt_name not in model_cache_dirs:
-        # 		tmp = DeepseekV2ForCausalLM.from_pretrained(self.huggingface_ckpt_name, torch_dtype="auto", trust_remote_code=True)
-        # 		del tmp
-        # 		gc.collect()
-        # 	parameter_ckpt_dir = os.path.join(self.cache_dir, "models--deepseek-ai-" + self.huggingface_ckpt_name)
-        # 	parameter_ckpt_dir = os.path.join(parameter_ckpt_dir, "snapshots")
-        # 	parameter_ckpt_dir = os.listdir(parameter_ckpt_dir)[0]
-        # 	ckpt_files = os.listdir(parameter_ckpt_dir)
-        # 	ckpt_files = [os.path.join(parameter_ckpt_dir, ckpt) for ckpt in ckpt_files]
 
-        # 	for ckpt in tqdm(
-        # 		ckpt_files, desc="Loading checkpoint files", smoothing=0
-        # 	):
-        # 		tmp_state_dict = {}
-        # 		if ckpt.endswith(".safetensors"):
-        # 			with safe_open(ckpt, framework="pt", device="cpu") as f:
-        # 				for k in f.keys():
-        # 					tmp_state_dict[k] = f.get_tensor(k)
-        # 			torch.save(tmp_state_dict, os.path.join(self.cus_ckpt_dir, ckpt.split("/")[-1].replace(".safetensors", ".pt")))
+    # def _load_model_skeleton(self):
+    #     for key, param in self.skeleton_state_dict.items():
+    #         if '.' in key:
+    #             module_path, param_name = key.rsplit('.', 1)
+    #             module = self.model
+    #             for part in module_path.split('.'):
+    #                 if part.isdigit():
+    #                     module = module[int(part)]
+    #                 else:
+    #                     module = getattr(module, part)
+    #             setattr(module, param_name, param)
+    #         else:
+    #             setattr(self.model, key, param)
 
-    def _load_model_skeleton(self, skieleton_state_dict):
-        for key, param in skieleton_state_dict.items():
-            levels = key.split(".")
-            weight = self.model.__getattr__(levels[0])
-            for level in levels[1:]:
-                weight = weight.__getattr__(level)
-            weight.data = param
-        byte_size = (
+    #     byte_size = (
+    #         sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+    #         * 2
+    #         / (1024**3)
+    #     )
+    #     logging.info(f"Model size: {byte_size:.2f} GB")
+    def _load_model_skeleton(self):
+        for key, param in self.model.named_parameters():
+            if key in self.skeleton_state_dict:
+                param.data = self.skeleton_state_dict[key]
+
+        model_skeletion_byte_size = (
             sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             * 2
             / (1024**3)
         )
-        logging.info(f"Model size: {byte_size:.2f} GB")
+        logging.info(f"Model skeleton size: {model_skeletion_byte_size:.2f} GB")
 
     def Init(self):
-        self._save_safetensors_to_pt()
         self._parse_state_dict()
         self.core_engine = core_engine(self.engine_config, self.model_config)
+        if "8x7B" in self.huggingface_ckpt_name:
+            param_byte_size = 48 * 1024 * 1024 * 1024 * 2
+        elif "8x22B" in self.huggingface_ckpt_name:
+            param_byte_size = 143 * 1024 * 1024 * 1024 * 2
+        else:
+            raise ValueError("Model not supported yet")
         self.core_engine.Init(
-            self.pt_ckpt_dir, self.state_dict_name_map, self.weight_copy_task
+            self.shm_name,
+            self.tensor_meta_shm_name,
+            param_byte_size,
+            self.weight_copy_task,
         )
-        skeleton_state_dict = self.core_engine.get_skeleton_state_dict()
-        self._load_model_skeleton(skeleton_state_dict)
+        self._load_model_skeleton()
         self._config_attn_module()
         self._config_expert_module()
         self._config_lm_head_hook()
@@ -543,82 +671,49 @@ class Mixtral_Initializer:
 
         self.weight_copy_task["attn"] = []
         self.weight_copy_task["routed_expert"] = []
-        self.weight_copy_task["shared_expert"] = []
+        # self.weight_copy_task["shared_expert"] = []
 
-        # for layer_idx in trange(self.model_config.num_hidden_layers):
-        # 	for name, _ in self.model.model.layers[layer_idx].self_attn.named_parameters():
-        # 		tensor_full_name = "model.layers." + str(layer_idx) + ".self_attn." + name
-        # 		self.state_dict_name_map[tensor_full_name] = {"module_key": "attn_" + str(layer_idx), "tensor_key": name}
-        # 	self.weight_copy_task['attn'].append("attn_" + str(layer_idx))
+        for layer_idx in trange(
+            len(self.model.model.layers), desc="Parsing state_dict"
+        ):
+            for name, _ in self.model.model.layers[
+                layer_idx
+            ].self_attn.named_parameters():
+                tensor_full_name = (
+                    "model.layers." + str(layer_idx) + ".self_attn." + name
+                )
+                self.state_dict_name_map[tensor_full_name] = {
+                    "module_key": "attn_" + str(layer_idx),
+                    "tensor_key": name,
+                }
+            self.weight_copy_task["attn"].append("attn_" + str(layer_idx))
 
-        # 	for expert_idx in range(self.model_config.num_local_experts):
-        # 		for name, _ in self.model.model.layers[layer_idx].block_sparse_moe.experts[expert_idx].named_parameters():
-        # 			tensor_full_name = "model.layers." + str(layer_idx) + ".block_sparse_moe.experts." + str(expert_idx) + "." + name
-        # 			self.state_dict_name_map[tensor_full_name] = {"module_key": "routed_expert_" + str(layer_idx) + "_" + str(expert_idx), "tensor_key": name}
-        # 		self.weight_copy_task['routed_expert'].append("routed_expert_" + str(layer_idx) + "_" + str(expert_idx))
-
-        # TODO:
-        if "mistralai/Mixtral-8x22B" in self.hf_model_config._name_or_path:
-            # Setting 2: Put Attn in the skeleton.
-            for layer_idx in range(self.model_config.num_hidden_layers):
-                for expert_idx in range(self.model_config.num_local_experts):
-                    for name, _ in (
-                        self.model.model.layers[layer_idx]
-                        .block_sparse_moe.experts[expert_idx]
-                        .named_parameters()
-                    ):
-                        tensor_full_name = (
-                            "model.layers."
-                            + str(layer_idx)
-                            + ".block_sparse_moe.experts."
-                            + str(expert_idx)
-                            + "."
-                            + name
-                        )
-                        self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": "routed_expert_"
-                            + str(layer_idx)
-                            + "_"
-                            + str(expert_idx),
-                            "tensor_key": name,
-                        }
-                    self.weight_copy_task["routed_expert"].append(
-                        "routed_expert_"
+            for expert_idx in range(
+                len(self.model.model.layers[layer_idx].block_sparse_moe.experts)
+            ):
+                for name, _ in (
+                    self.model.model.layers[layer_idx]
+                    .block_sparse_moe.experts[expert_idx]
+                    .named_parameters()
+                ):
+                    tensor_full_name = (
+                        "model.layers."
+                        + str(layer_idx)
+                        + ".block_sparse_moe.experts."
+                        + str(expert_idx)
+                        + "."
+                        + name
+                    )
+                    self.state_dict_name_map[tensor_full_name] = {
+                        "module_key": "routed_expert_"
                         + str(layer_idx)
                         + "_"
-                        + str(expert_idx)
-                    )
-
-        if "mistralai/Mixtral-8x7B" in self.hf_model_config._name_or_path:
-            # setting 2: Attn and first expert in the skeleton.
-            for layer_idx in range(self.model_config.num_hidden_layers):
-                for expert_idx in range(1, self.model_config.num_local_experts):
-                    for name, _ in (
-                        self.model.model.layers[layer_idx]
-                        .block_sparse_moe.experts[expert_idx]
-                        .named_parameters()
-                    ):
-                        tensor_full_name = (
-                            "model.layers."
-                            + str(layer_idx)
-                            + ".block_sparse_moe.experts."
-                            + str(expert_idx)
-                            + "."
-                            + name
-                        )
-                        self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": "routed_expert_"
-                            + str(layer_idx)
-                            + "_"
-                            + str(expert_idx),
-                            "tensor_key": name,
-                        }
-                    self.weight_copy_task["routed_expert"].append(
-                        "routed_expert_"
-                        + str(layer_idx)
-                        + "_"
-                        + str(expert_idx)
-                    )
+                        + str(expert_idx),
+                        "tensor_key": name,
+                    }
+                self.weight_copy_task["routed_expert"].append(
+                    "routed_expert_" + str(layer_idx) + "_" + str(expert_idx)
+                )
 
     def _config_attn_module(self):
         """

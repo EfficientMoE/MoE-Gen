@@ -716,6 +716,11 @@ class DeepSeek_Initializer:
 
         return model_config
 
+    def save_and_load(self, file_path, save_dir):
+        tensor_dict = load_file(file_path)
+        torch.save(tensor_dict, save_dir)
+        return tensor_dict
+
     def _save_safetensors_to_pt(self):
         ckpt_files = os.listdir(self.cache_dir)
         ckpt_files = [
@@ -723,11 +728,6 @@ class DeepSeek_Initializer:
             for ckpt in ckpt_files
             if ckpt.endswith(".safetensors")
         ]
-
-        def save_and_load(file_path, save_dir):
-            tensor_dict = load_file(file_path)
-            torch.save(tensor_dict, save_dir)
-            return tensor_dict
 
         processes = []
         for ckpt in tqdm(
@@ -740,7 +740,7 @@ class DeepSeek_Initializer:
             if os.path.exists(dst_dir):
                 continue
 
-            p = Process(target=save_and_load, args=(ckpt, dst_dir))
+            p = Process(target=self.save_and_load, args=(ckpt, dst_dir))
             p.start()
             processes.append(p)
 
@@ -748,30 +748,6 @@ class DeepSeek_Initializer:
             p.join()
             p.close()
         logging.info("All safetensor loader processes joined")
-        # TODO:
-        # if self.cache_dir is None:
-        # 	from transformers import TRANSFORMERS_CACHE
-        # 	self.cache_dir = TRANSFORMERS_CACHE
-        # 	model_cache_dirs = os.listdir(self.cache_dir)
-        # 	if "models--deepseek-ai-" + self.huggingface_ckpt_name not in model_cache_dirs:
-        # 		tmp = DeepseekV2ForCausalLM.from_pretrained(self.huggingface_ckpt_name, torch_dtype="auto", trust_remote_code=True)
-        # 		del tmp
-        # 		gc.collect()
-        # 	parameter_ckpt_dir = os.path.join(self.cache_dir, "models--deepseek-ai-" + self.huggingface_ckpt_name)
-        # 	parameter_ckpt_dir = os.path.join(parameter_ckpt_dir, "snapshots")
-        # 	parameter_ckpt_dir = os.listdir(parameter_ckpt_dir)[0]
-        # 	ckpt_files = os.listdir(parameter_ckpt_dir)
-        # 	ckpt_files = [os.path.join(parameter_ckpt_dir, ckpt) for ckpt in ckpt_files]
-
-        # 	for ckpt in tqdm(
-        # 		ckpt_files, desc="Loading checkpoint files", smoothing=0
-        # 	):
-        # 		tmp_state_dict = {}
-        # 		if ckpt.endswith(".safetensors"):
-        # 			with safe_open(ckpt, framework="pt", device="cpu") as f:
-        # 				for k in f.keys():
-        # 					tmp_state_dict[k] = f.get_tensor(k)
-        # 			torch.save(tmp_state_dict, os.path.join(self.cus_ckpt_dir, ckpt.split("/")[-1].replace(".safetensors", ".pt")))
 
     def _load_model_skeleton(self, skeleton_state_dict):
         # logging.info(skieleton_state_dict.keys())

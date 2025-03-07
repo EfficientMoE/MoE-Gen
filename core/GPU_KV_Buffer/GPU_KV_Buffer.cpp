@@ -147,6 +147,7 @@ void GPU_KV_Buffer::kv_copy_complete(int64_t layer_idx, int64_t micro_batch_idx,
 
 torch::Tensor GPU_KV_Buffer::get_k(int64_t layer_idx, int64_t micro_batch_idx,
                                    std::vector<int64_t> tensor_shape) {
+    cudaSetDevice(this->engine_config_.basic_config.device);
     /* Sync */
     std::string key =
         std::to_string(layer_idx) + "_" + std::to_string(micro_batch_idx);

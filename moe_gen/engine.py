@@ -180,37 +180,36 @@ def moe_gen(
         )
     else:
         cache_dir = model_path
-    # logging.info(f"Model Path: {model_path}")
-
-    # if cache_dir is None:
-    # 	hf_hub_model_dir = "models--" + huggingface_ckpt_name.replace("/", "--")
-    # 	cache_dir = os.path.join(hf_cache_dir, hf_hub_model_dir, "snapshots")
-    # 	# check subdirs in cache_dir, use the first one contains .safetensor
-    # 	subdirs = [d for d in os.listdir(cache_dir) if os.path.isdir(os.path.join(cache_dir, d))]
-    # 	for subdir in subdirs:
-    # 		if ".safetensor" in os.listdir(os.path.join(cache_dir, subdir)):
-    # 			cache_dir = os.path.join(cache_dir, subdir)
-    # 			break
 
     if pt_ckpt_dir is None:
-        # pt_ckpt_dir = os.path.join(
-        #     os.path.dirname(os.path.abspath(__file__)),
-        #     "models",
-        #     huggingface_ckpt_name,
-        # )
-
-        # Create a dir under huggingface cache dir.
         pt_ckpt_dir = os.path.join(
             hf_cache_dir, "pt_ckpt", huggingface_ckpt_name
         )
         if not os.path.exists(pt_ckpt_dir):
             os.makedirs(pt_ckpt_dir)
+    else:
+        pt_ckpt_dir = os.path.join(pt_ckpt_dir, huggingface_ckpt_name)
+        if not os.path.exists(pt_ckpt_dir):
+            os.makedirs(pt_ckpt_dir)
     logging.info(f"Will dump model parameters to: {pt_ckpt_dir}")
 
     # Step 0: Start Parameter Server.
-    parameter_server = DeepSeek_Parameter_Server(
-        huggingface_ckpt_name, cache_dir, pt_ckpt_dir
-    )
+    if "deepseek" in huggingface_ckpt_name:
+        parameter_server = DeepSeek_Parameter_Server(
+            huggingface_ckpt_name, cache_dir, pt_ckpt_dir
+        )
+    elif "Mixtral" in huggingface_ckpt_name:
+        from moe_gen.models.mixtral.mixtral_parameter_server import (
+            Mixtral_Parameter_Server,
+        )
+
+        parameter_server = Mixtral_Parameter_Server(
+            huggingface_ckpt_name, cache_dir, pt_ckpt_dir
+        )
+    else:
+        raise ValueError(
+            f"Model architecture {huggingface_ckpt_name} not supported yet."
+        )
     shm_name, tensor_meta_shm_name = parameter_server.Init()
     skeleton_state_dict = (
         parameter_server.parameter_server.get_skeleton_state_dict()
@@ -345,15 +344,24 @@ class MoE_Gen:
             cache_dir=self.hf_cache_dir,
             trust_remote_code=True,
         )
+        if self.model_config.architectures[0] == "MixtralForCausalLM":
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         if self.model_config.architectures[0] == "MixtralForCausalLM":
-            from moe_gen.models.Mixtral_Initializer import Mixtral_Initializer
+            from moe_gen.models.mixtral.Mixtral_Initializer import (
+                Mixtral_Initializer,
+            )
 
             self.initializer = Mixtral_Initializer(
                 self.huggingface_ckpt_name,
                 self.hf_cache_dir,
                 self.cache_dir,
                 self.engine_config,
+                self.skeleton_state_dict,
+                self.shm_name,
+                self.tensor_meta_shm_name,
+                self.pt_ckpt_dir,
+                self.host_kv_cache_size,
             )
         elif self.model_config.architectures[0] == "Qwen2MoeForCausalLM":
             from moe_gen.models.Qwen_Initializer import Qwen_Initializer
@@ -654,6 +662,12 @@ class MoE_Gen:
             for query_idx in range(self.num_queries)
         ]
 
+        # Print first 5 sequences
+        # for query_idx in range(5):
+        #     logging.info(
+        #         f"Decoded tokens: {res[query_idx].squeeze().tolist()}"
+        #     )
+
         # Show peak memory allocated
         # peak_memory = torch.cuda.max_memory_allocated(self.torch_device)
         # logging.info(f"Peak memory allocated: {peak_memory}")
@@ -665,13 +679,10 @@ class MoE_Gen:
         """
         self.set_phase("prefill")
         self.core_engine.clear_weight_copy_queue()
-        # logging.info("Weight copy queue cleared.")
-        time.sleep(0.5)
+        # time.sleep(1)
         self.core_engine.reset_prefill_buffer()
-        # logging.info("Prefill buffer reset.")
-        time.sleep(0.5)
+        # time.sleep(1)
         self.core_engine.reset_weight_copy_queue()
-        # logging.info("Weight copy queue reset.")
 
         logging.info("Weight buffer cleared.")
         if "deepseek" in self.model_config.model_type:
@@ -726,6 +737,12 @@ class MoE_Gen:
                             Prefill_micro_batch_attention_masks[micro_batch_idx]
                         )
                     )
+                else:
+                    Attn_Wrapper.position_ids = (
+                        create_position_ids_from_attention_mask(
+                            Prefill_micro_batch_attention_masks[micro_batch_idx]
+                        )
+                    )
                 cur_batch_size = prefill_micro_batch_input_ids[
                     micro_batch_idx
                 ].shape[0]
@@ -747,7 +764,6 @@ class MoE_Gen:
                     use_cache=False,
                 )
                 # Greedy
-                # logging.info(f"Output logits: {outputs.logits[:, -1, :]}")
                 new_tokens = torch.argmax(
                     outputs.logits[:, -1, :], dim=-1
                 ).view(-1, 1)
@@ -768,7 +784,6 @@ class MoE_Gen:
         self.set_phase("decoding")
         self.core_engine.clear_kv_copy_queue()
         logging.debug("KV copy queue cleared.")
-        time.sleep(0.5)
         self.core_engine.clear_kv_buffer()
         logging.debug("KV buffer cleared.")
         if "deepseek" in self.model_config.model_type:
@@ -784,6 +799,14 @@ class MoE_Gen:
             # Step 1: Before each round of decoding, review the attention mode and batching plan.
             # TODO: review attention mode. Current fixing attention mode.
             RUNTIME_ATTN_MODE = self.engine_config.Basic_Config.attn_mode
+            if RUNTIME_ATTN_MODE == 2:
+                w = float(os.getenv("SPLIT_RATIO_W", None))
+                if w is None:
+                    logging.info(
+                        f"CPU compute ratio not set. Default setting applied."
+                    )
+                    w = 0.6
+                logging.info(f"Split ratio: {w}")
 
             if RUNTIME_ATTN_MODE == 0:
                 """
@@ -803,7 +826,7 @@ class MoE_Gen:
                         ],
                         dim=0,
                     )
-                    if self.model_config.model_type != "deepseek_v2":
+                    if "deepseek" not in self.model_config.model_type:
                         position_ids = create_position_ids_from_attention_mask(
                             attention_mask
                         )[:, -1].unsqueeze(-1)
@@ -839,11 +862,11 @@ class MoE_Gen:
                         -1, 1
                     )
                     # logging.info(f"New tokens: {new_tokens}")
-                    start = time.perf_counter()
+                    # start = time.perf_counter()
                     self.update_new_token(new_tokens, batch, new_token_idx)
-                    logging.info(
-                        f"Update new token time is ms: {(time.perf_counter() - start) * 1000} ms"
-                    )
+                    # logging.info(
+                    #     f"Update new token time is ms: {(time.perf_counter() - start) * 1000} ms"
+                    # )
 
                 # TODO: Temporally remove.
                 # Check <EOS>, if <EOS>, remove from batch.
@@ -882,12 +905,16 @@ class MoE_Gen:
                                 * self.model_config.compressed_kv_dim
                                 * 2
                             )
-                        else:
+                        elif "mixtral" in self.model_config.model_type:
                             past_kv_byte_size = (
                                 (self.max_input_length + idx)
                                 * self.model_config.num_key_value_heads
                                 * self.model_config.head_dim
                                 * 2
+                            )
+                        else:
+                            raise ValueError(
+                                f"Model architecture {self.model_config.model_type} not supported yet."
                             )
 
                         for layer_idx in range(
@@ -960,11 +987,8 @@ class MoE_Gen:
 					CPU-GPU Parallel ATTN
 				"""
                 # TODO: wordload partitioning.
-                # CPU batch use 70% of the batch, GPU batch use 30% of the batch.
-                w = int(os.getenv("SPLIT_RATIO_W", 7))
-                logging.info(f"Split ratio: {w}")
-                CPU_batch = batch[: math.ceil(len(batch) * w // 10)]
-                GPU_batch = batch[math.ceil(len(batch) * w // 10) :]
+                CPU_batch = batch[: math.ceil(len(batch) * w)]
+                GPU_batch = batch[math.ceil(len(batch) * w) :]
                 logging.info(
                     f"CPU batch size: {len(CPU_batch)}, GPU batch size: {len(GPU_batch)}"
                 )

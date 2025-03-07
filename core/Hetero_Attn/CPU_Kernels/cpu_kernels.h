@@ -52,10 +52,10 @@ torch::Tensor grouped_query_attention_cpu_avx2(
     int64_t group_size, int64_t num_attention_heads, int64_t num_kv_head,
     int64_t head_dim, int64_t num_threads);
 
-torch::Tensor grouped_query_attention_cpu_avx2_deepseekv2(
-    const torch::Tensor& query_states,
-    const std::vector<c10::BFloat16*>& key_states,
-    const std::vector<c10::BFloat16*>& value_states,
-    const torch::Tensor& attention_mask, int64_t cache_length,
-    int64_t group_size, int64_t num_attention_heads, int64_t num_kv_head,
-    int64_t qk_head_dim, int64_t v_head_dim, int64_t num_threads);
+// torch::Tensor grouped_query_attention_cpu_avx2_deepseekv2(
+//     const torch::Tensor& query_states,
+//     const std::vector<c10::BFloat16*>& key_states,
+//     const std::vector<c10::BFloat16*>& value_states,
+//     const torch::Tensor& attention_mask, int64_t cache_length,
+//     int64_t group_size, int64_t num_attention_heads, int64_t num_kv_head,
+//     int64_t qk_head_dim, int64_t v_head_dim, int64_t num_threads);
