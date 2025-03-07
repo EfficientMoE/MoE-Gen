@@ -76,8 +76,11 @@ if __name__ == "__main__":
 
         Set attetion mode: 0 for CPU, 1 for GPU, 2 for hybrid
         e.g. os.environ["ATTN_MODE"] = "1"
+
+        For mixtral model, user would need to check the license agreement and set the HF_TOKEN
     """
     os.environ["ATTN_MODE"] = "1"
+    os.environ["HF_TOKEN"] = "<huggingface token>"
     answer_set = moe_gen(
         huggingface_ckpt_name=hugging_face_checkpoint,
         queries=queries,
