@@ -200,8 +200,9 @@ def moe_gen(
         )
     elif "Mixtral" in huggingface_ckpt_name:
         from moe_gen.models.mixtral.mixtral_parameter_server import (
-            Mixtral_Parameter_Server
+            Mixtral_Parameter_Server,
         )
+
         parameter_server = Mixtral_Parameter_Server(
             huggingface_ckpt_name, cache_dir, pt_ckpt_dir
         )
@@ -347,7 +348,9 @@ class MoE_Gen:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         if self.model_config.architectures[0] == "MixtralForCausalLM":
-            from moe_gen.models.mixtral.Mixtral_Initializer import Mixtral_Initializer
+            from moe_gen.models.mixtral.Mixtral_Initializer import (
+                Mixtral_Initializer,
+            )
 
             self.initializer = Mixtral_Initializer(
                 self.huggingface_ckpt_name,
@@ -659,7 +662,7 @@ class MoE_Gen:
             for query_idx in range(self.num_queries)
         ]
 
-        # Pring first 5 sequences
+        # Print first 5 sequences
         # for query_idx in range(5):
         #     logging.info(
         #         f"Decoded tokens: {res[query_idx].squeeze().tolist()}"
@@ -742,7 +745,7 @@ class MoE_Gen:
                         create_position_ids_from_attention_mask(
                             Prefill_micro_batch_attention_masks[micro_batch_idx]
                         )
-                    )                  
+                    )
                 cur_batch_size = prefill_micro_batch_input_ids[
                     micro_batch_idx
                 ].shape[0]
@@ -803,7 +806,9 @@ class MoE_Gen:
             if RUNTIME_ATTN_MODE == 2:
                 w = float(os.getenv("SPLIT_RATIO_W", None))
                 if w is None:
-                    logging.info(f"CPU compute ratio not set. Default setting applied.")
+                    logging.info(
+                        f"CPU compute ratio not set. Default setting applied."
+                    )
                     w = 0.5
                 logging.info(f"Split ratio: {w}")
 

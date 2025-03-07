@@ -18,26 +18,24 @@
 
 import logging
 import os
+import shutil
 from multiprocessing import Process
 
 import torch
 from safetensors.torch import load_file
 from tqdm import tqdm, trange
-from transformers import AutoConfig
-import shutil
 
 # from .deepseekv2.modeling_deepseek_v2 import DeepseekV2ForCausalLM
 # from .deepseekv3.modeling_deepseek_v3 import DeepseekV3ForCausalLM
-from transformers import MixtralForCausalLM, AutoConfig
+from transformers import AutoConfig, MixtralForCausalLM
 
 try:
     from moe_gen.core_engine import Parameter_Server
 except ImportError:
     # jit compile
-    from moe_gen.models.engine_loader import core_engine
     from core_engine import Parameter_Server
 
-    
+    from moe_gen.models.engine_loader import core_engine
 
 
 class Mixtral_Parameter_Server:
@@ -51,9 +49,11 @@ class Mixtral_Parameter_Server:
         # Get hf_token from env
         hf_token = os.getenv("HF_TOKEN")
         if hf_token is None:
-            raise ValueError("Please set HF_TOKEN in environment variable to use Mixtral models")
+            raise ValueError(
+                "Please set HF_TOKEN in environment variable to use Mixtral models"
+            )
         self.hf_model_config = AutoConfig.from_pretrained(
-            huggingface_ckpt_name, token = hf_token
+            huggingface_ckpt_name, token=hf_token
         )
 
         # self.hf_model_config = AutoConfig.from_pretrained(huggingface_ckpt_name, cache_dir=cache_dir, trust_remote_code=True)
@@ -143,10 +143,7 @@ class Mixtral_Parameter_Server:
                         "tensor_key": name,
                     }
                 self.weight_copy_task["routed_expert"].append(
-                    "routed_expert_"
-                    + str(layer_idx)
-                    + "_"
-                    + str(expert_idx)
+                    "routed_expert_" + str(layer_idx) + "_" + str(expert_idx)
                 )
 
     def save_and_load(self, file_path, save_dir):
@@ -173,8 +170,10 @@ class Mixtral_Parameter_Server:
             # logging.info(f"dst_dir: {dst_dir}")
             if os.path.exists(dst_dir):
                 continue
-            
-            logging.info(f"Checkpoint file: {ckpt} not found in {self.pt_ckpt_dir}. Dump it now. Will omit this step next time run this model.")
+
+            logging.info(
+                f"Checkpoint file: {ckpt} not found in {self.pt_ckpt_dir}. Dump it now. Will omit this step next time run this model."
+            )
             p = Process(target=self.save_and_load, args=(ckpt, dst_dir))
             p.start()
             processes.append(p)
@@ -182,14 +181,18 @@ class Mixtral_Parameter_Server:
         try:
             for p in processes:
                 p.join()
-                if p.exitcode != 0:  # Check if process terminated with non-zero exit code
+                if (
+                    p.exitcode != 0
+                ):  # Check if process terminated with non-zero exit code
                     print(f"Process terminated with exit code {p.exitcode}")
                     import sys
+
                     sys.exit(1)  # Terminate the program with error code
                 p.close()
         except Exception as e:
             print(f"Error occurred: {e}")
             import sys
+
             sys.exit(1)  # Terminate the program with error code
         logging.info("All safetensor loader processes joined")
 

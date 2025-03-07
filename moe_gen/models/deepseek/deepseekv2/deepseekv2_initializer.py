@@ -720,7 +720,7 @@ class DeepSeek_Initializer:
         tensor_dict = load_file(file_path)
         torch.save(tensor_dict, save_dir)
         return tensor_dict
-    
+
     def _save_safetensors_to_pt(self):
         ckpt_files = os.listdir(self.cache_dir)
         ckpt_files = [
@@ -728,8 +728,6 @@ class DeepSeek_Initializer:
             for ckpt in ckpt_files
             if ckpt.endswith(".safetensors")
         ]
-
-
 
         processes = []
         for ckpt in tqdm(

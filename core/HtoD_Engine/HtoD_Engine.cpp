@@ -239,12 +239,17 @@ void HtoD_Engine::HtoD_Worker() {
                     // }
                     src_ptr = host_tensor_storage.data_ptr;
                     src_byte_size = host_tensor_storage.byte_size;
-                    // this->blocking_copy_(dst[tensor_name].data_ptr(), src_ptr,
+                    // this->blocking_copy_(dst[tensor_name].data_ptr(),
+                    // src_ptr,
                     //                      src_byte_size);
-                    if (dst[tensor_name].defined() && dst[tensor_name].has_storage()) {
-                        this->blocking_copy_(dst[tensor_name].data_ptr(), src_ptr, src_byte_size);
+                    if (dst[tensor_name].defined() &&
+                        dst[tensor_name].has_storage()) {
+                        this->blocking_copy_(dst[tensor_name].data_ptr(),
+                                             src_ptr, src_byte_size);
                     } else {
-                        this->logger_->error("Tensor {} doesn't have valid storage", tensor_name);
+                        this->logger_->error(
+                            "Tensor {} doesn't have valid storage",
+                            tensor_name);
                         std::runtime_error("Tensor doesn't have valid storage");
                     }
                 }

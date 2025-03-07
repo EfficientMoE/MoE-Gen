@@ -39,10 +39,11 @@ try:
 except ImportError:
     # jit compile
     from core_engine import MoE_Gen as core_engine
-from moe_gen.config import EngineConfig, ModelConfig
-from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 from safetensors.torch import load_file
 from tqdm import trange
+
+from moe_gen.config import EngineConfig, ModelConfig
+from moe_gen.models.Wrapper import Attn_Wrapper, Expert_Wrapper
 
 
 def _QKV_Proj(self, hidden_states, position_ids, kv_seq_len):
@@ -259,12 +260,12 @@ class Mixtral_Initializer:
             cache_dir=hf_cache_dir,
             trust_remote_code=True,
         )
-        
+
         self.model_config = self._parse_model_config()
         self._default_engine_config()
         self.state_dict_name_map = {}
         self.weight_copy_task = {}
-        
+
         # Use provided pt_ckpt_dir or create default one
         if pt_ckpt_dir:
             self.pt_ckpt_dir = pt_ckpt_dir
@@ -273,7 +274,7 @@ class Mixtral_Initializer:
                 os.path.dirname(os.path.abspath(__file__)),
                 self.huggingface_ckpt_name,
             )
-        
+
         if not os.path.exists(self.pt_ckpt_dir):
             os.makedirs(self.pt_ckpt_dir)
 
@@ -283,7 +284,7 @@ class Mixtral_Initializer:
         )
         total_memory = props.total_memory / (1024**3)
         logging.info(f"Current device total memory: {total_memory} GB")
-        
+
         if "8x7B" in self.hf_model_config._name_or_path:
             self.engine_config.Basic_Config.log_level = "info"
             self.engine_config.Basic_Config.torch_dtype = torch.bfloat16
@@ -401,7 +402,6 @@ class Mixtral_Initializer:
                 },
             }
 
-
         elif "8x22B" in self.hf_model_config._name_or_path:
             self.engine_config.Basic_Config.log_level = "info"
             self.engine_config.Basic_Config.torch_dtype = torch.bfloat16
@@ -503,7 +503,7 @@ class Mixtral_Initializer:
                     + self.engine_config.Basic_Config.padding_length
                 )
             )
-            
+
             self.engine_config.GPU_Buffer_Config.module_shapes = {
                 "attn": {
                     "q_proj.weight": [6144, 6144],
@@ -519,8 +519,9 @@ class Mixtral_Initializer:
             }
 
         else:
-            raise ValueError(f"Model {self.hf_model_config._name_or_path} not supported yet")
-
+            raise ValueError(
+                f"Model {self.hf_model_config._name_or_path} not supported yet"
+            )
 
     def _parse_model_config(self):
         model_config = ModelConfig()
@@ -549,16 +550,17 @@ class Mixtral_Initializer:
 
         return model_config
 
-
-    def save_and_load(self,file_path, save_dir):
+    def save_and_load(self, file_path, save_dir):
         temp_state_dict = {}
         filename = os.path.basename(file_path)
-        save_path = os.path.join(save_dir, filename.replace('.safetensors', '.pt'))
-        
+        save_path = os.path.join(
+            save_dir, filename.replace(".safetensors", ".pt")
+        )
+
         if os.path.exists(save_path):
             logging.info(f"File {save_path} already exists, skipping")
             return
-            
+
         temp_state_dict = load_file(file_path)
         torch.save(temp_state_dict, save_path)
         logging.info(f"Saved {file_path} to {save_path}")
@@ -575,7 +577,9 @@ class Mixtral_Initializer:
         for ckpt in tqdm(
             ckpt_files, desc="Loading checkpoint files", smoothing=0
         ):
-            p = Process(target=self.save_and_load, args=(ckpt, self.pt_ckpt_dir))
+            p = Process(
+                target=self.save_and_load, args=(ckpt, self.pt_ckpt_dir)
+            )
             p.start()
             processes.append(p)
 
@@ -596,7 +600,7 @@ class Mixtral_Initializer:
     #             setattr(module, param_name, param)
     #         else:
     #             setattr(self.model, key, param)
-                
+
     #     byte_size = (
     #         sum(p.numel() for p in self.model.parameters() if p.requires_grad)
     #         * 2
@@ -628,7 +632,7 @@ class Mixtral_Initializer:
             self.shm_name,
             self.tensor_meta_shm_name,
             param_byte_size,
-            self.weight_copy_task,            
+            self.weight_copy_task,
         )
         self._load_model_skeleton()
         self._config_attn_module()
@@ -708,10 +712,7 @@ class Mixtral_Initializer:
                         "tensor_key": name,
                     }
                 self.weight_copy_task["routed_expert"].append(
-                    "routed_expert_"
-                    + str(layer_idx)
-                    + "_"
-                    + str(expert_idx)
+                    "routed_expert_" + str(layer_idx) + "_" + str(expert_idx)
                 )
 
     def _config_attn_module(self):

@@ -127,12 +127,13 @@ torch::Tensor Hetero_Attn::_attn_mode_0(py::object& PyTorch_attn_module,
             .attr("QKV_Proj")(hidden_states, position_ids, kv_seq_len)
             .cast<std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>>();
     CUDA_CHECK(cudaStreamSynchronize(0));
-    
+
     this->logger_->debug("QKV_Proj computed.");
     auto [query_states, key_states, value_states] = qkv_result;
     this->logger_->debug("QKV decomposed.");
     // try{
-    //     attention_mask = this->d2h_engine_.tensor_on_demand_copy(attention_mask);
+    //     attention_mask =
+    //     this->d2h_engine_.tensor_on_demand_copy(attention_mask);
     //     this->logger_->debug("attn mask copied to host.");
     // } catch (const std::exception& e) {
     //     std::cerr << e.what() << '\n';
@@ -159,21 +160,23 @@ torch::Tensor Hetero_Attn::_attn_mode_0(py::object& PyTorch_attn_module,
     this->logger_->debug("query_states shape: {}",
                          get_tensor_shape(query_states));
     torch::Tensor attn_output;
-    try{
+    try {
         auto kernel_start = std::chrono::high_resolution_clock::now();
         attn_output = grouped_query_attention_cpu_avx2(
-            query_states, k_ptrs, v_ptrs, attention_mask, attention_mask.size(-1),
+            query_states, k_ptrs, v_ptrs, attention_mask,
+            attention_mask.size(-1),
             this->model_config_.num_attention_heads /
                 this->model_config_.num_key_value_heads,
             this->model_config_.num_attention_heads,
-            this->model_config_.num_key_value_heads, this->model_config_.head_dim,
+            this->model_config_.num_key_value_heads,
+            this->model_config_.head_dim,
             this->engine_config_.basic_config.num_threads);
         auto kernel_end = std::chrono::high_resolution_clock::now();
         auto kernel_duration =
             std::chrono::duration_cast<std::chrono::microseconds>(kernel_end -
-                                                                kernel_start);
+                                                                  kernel_start);
         this->logger_->debug("CPU Attn kernel duration: {} microseconds.",
-                            kernel_duration.count());
+                             kernel_duration.count());
 
         this->logger_->debug("CPU Attn output computed.");
     } catch (const std::exception& e) {
@@ -338,7 +341,8 @@ torch::Tensor Hetero_Attn::_attn_mode_2(
             - CPU GPU attn parallel.
             - Call python module's O_Proj
     */
-    // if (this->model_config_.model_type.find("deepseek") != std::string::npos) {
+    // if (this->model_config_.model_type.find("deepseek") != std::string::npos)
+    // {
     //     return this->_attn_mode_2_deepseekv2(PyTorch_attn_module, layer_idx,
     //                                          hidden_states, attention_mask,
     //                                          position_ids, micro_batches);
@@ -529,18 +533,23 @@ torch::Tensor Hetero_Attn::_attn_mode_2(
 //         int64_t GPU_batch_end_idx = query_states.size(0);
 
 //         auto CPU_query_states = query_states.index(
-//             {torch::indexing::Slice(CPU_batch_start_idx, CPU_batch_end_idx)});
+//             {torch::indexing::Slice(CPU_batch_start_idx,
+//             CPU_batch_end_idx)});
 //         auto CPU_key_states = key_states.index(
-//             {torch::indexing::Slice(CPU_batch_start_idx, CPU_batch_end_idx)});
+//             {torch::indexing::Slice(CPU_batch_start_idx,
+//             CPU_batch_end_idx)});
 //         auto CPU_value_states = value_states.index(
-//             {torch::indexing::Slice(CPU_batch_start_idx, CPU_batch_end_idx)});
+//             {torch::indexing::Slice(CPU_batch_start_idx,
+//             CPU_batch_end_idx)});
 //         auto CPU_attention_mask = attention_mask.index(
-//             {torch::indexing::Slice(CPU_batch_start_idx, CPU_batch_end_idx)});
+//             {torch::indexing::Slice(CPU_batch_start_idx,
+//             CPU_batch_end_idx)});
 
 //         std::thread update_new_compressed_kv_thread(
 //             [this, layer_idx, full_batch, new_compressed_kv]() {
 //                 this->kv_storage_.update(layer_idx, full_batch,
-//                                          new_compressed_kv, new_compressed_kv);
+//                                          new_compressed_kv,
+//                                          new_compressed_kv);
 //             });
 
 //         std::future<torch::Tensor> CPU_result_future;
@@ -549,11 +558,14 @@ torch::Tensor Hetero_Attn::_attn_mode_2(
 //             CPU_attention_mask, CPU_Batch);
 
 //         auto GPU_query_states = query_states.index(
-//             {torch::indexing::Slice(GPU_batch_start_idx, GPU_batch_end_idx)});
+//             {torch::indexing::Slice(GPU_batch_start_idx,
+//             GPU_batch_end_idx)});
 //         auto GPU_key_states = key_states.index(
-//             {torch::indexing::Slice(GPU_batch_start_idx, GPU_batch_end_idx)});
+//             {torch::indexing::Slice(GPU_batch_start_idx,
+//             GPU_batch_end_idx)});
 //         auto GPU_value_states = value_states.index(
-//             {torch::indexing::Slice(GPU_batch_start_idx, GPU_batch_end_idx)});
+//             {torch::indexing::Slice(GPU_batch_start_idx,
+//             GPU_batch_end_idx)});
 //         auto GPU_attention_mask =
 //             attention_mask
 //                 .index({torch::indexing::Slice(GPU_batch_start_idx,
@@ -596,7 +608,8 @@ torch::Tensor Hetero_Attn::_attn_mode_2(
 //         auto CPU_result = CPU_result_future.get();
 //         auto attn_output = torch::cat({CPU_result, GPU_result_tensor}, 0);
 //         update_new_compressed_kv_thread.join();
-//         auto final_output = PyTorch_attn_module.attr("Post_Attn")(attn_output)
+//         auto final_output =
+//         PyTorch_attn_module.attr("Post_Attn")(attn_output)
 //                                 .cast<torch::Tensor>();
 //         // CUDA_CHECK(cudaStreamSynchronize(0));
 //         return final_output;
@@ -674,10 +687,11 @@ std::future<torch::Tensor> Hetero_Attn::CPU_attn_mechanism(
 //                  attention_mask, layer_idx, batch]() {
 //         try {
 //             auto start = std::chrono::high_resolution_clock::now();
-//             auto cpu_query_states = query_states.to(torch::kCPU).contiguous();
-//             auto cpu_key_states = key_states.to(torch::kCPU).contiguous();
-//             auto cpu_value_states = value_states.to(torch::kCPU).contiguous();
-//             auto cpu_attention_mask =
+//             auto cpu_query_states =
+//             query_states.to(torch::kCPU).contiguous(); auto cpu_key_states =
+//             key_states.to(torch::kCPU).contiguous(); auto cpu_value_states =
+//             value_states.to(torch::kCPU).contiguous(); auto
+//             cpu_attention_mask =
 //                 attention_mask.to(torch::kCPU).contiguous();
 //             std::vector<c10::BFloat16*> k_ptrs;
 //             std::vector<c10::BFloat16*> v_ptrs;

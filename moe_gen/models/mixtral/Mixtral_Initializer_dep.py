@@ -547,42 +547,62 @@ class Mixtral_Initializer:
 
         if "mistralai/Mixtral-8x22B" in self.hf_model_config._name_or_path:
             for layer_idx in range(self.model_config.num_hidden_layers):
-                for name, _ in self.model.model.layers[layer_idx].self_attn.named_parameters():
-                    tensor_full_name = f"model.layers.{layer_idx}.self_attn.{name}"
+                for name, _ in self.model.model.layers[
+                    layer_idx
+                ].self_attn.named_parameters():
+                    tensor_full_name = (
+                        f"model.layers.{layer_idx}.self_attn.{name}"
+                    )
                     self.state_dict_name_map[tensor_full_name] = {
-                        "module_key": f"attn_{layer_idx}", 
-                        "tensor_key": name
+                        "module_key": f"attn_{layer_idx}",
+                        "tensor_key": name,
                     }
-                self.weight_copy_task['attn'].append(f"attn_{layer_idx}")
+                self.weight_copy_task["attn"].append(f"attn_{layer_idx}")
 
                 for expert_idx in range(self.model_config.num_local_experts):
-                    for name, _ in self.model.model.layers[layer_idx].block_sparse_moe.experts[expert_idx].named_parameters():
+                    for name, _ in (
+                        self.model.model.layers[layer_idx]
+                        .block_sparse_moe.experts[expert_idx]
+                        .named_parameters()
+                    ):
                         tensor_full_name = f"model.layers.{layer_idx}.block_sparse_moe.experts.{expert_idx}.{name}"
                         self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": f"routed_expert_{layer_idx}_{expert_idx}", 
-                            "tensor_key": name
+                            "module_key": f"routed_expert_{layer_idx}_{expert_idx}",
+                            "tensor_key": name,
                         }
-                    self.weight_copy_task['routed_expert'].append(f"routed_expert_{layer_idx}_{expert_idx}")
+                    self.weight_copy_task["routed_expert"].append(
+                        f"routed_expert_{layer_idx}_{expert_idx}"
+                    )
 
         if "mistralai/Mixtral-8x7B" in self.hf_model_config._name_or_path:
             for layer_idx in range(self.model_config.num_hidden_layers):
-                for name, _ in self.model.model.layers[layer_idx].self_attn.named_parameters():
-                    tensor_full_name = f"model.layers.{layer_idx}.self_attn.{name}"
+                for name, _ in self.model.model.layers[
+                    layer_idx
+                ].self_attn.named_parameters():
+                    tensor_full_name = (
+                        f"model.layers.{layer_idx}.self_attn.{name}"
+                    )
                     self.state_dict_name_map[tensor_full_name] = {
-                        "module_key": f"attn_{layer_idx}", 
-                        "tensor_key": name
+                        "module_key": f"attn_{layer_idx}",
+                        "tensor_key": name,
                     }
-                self.weight_copy_task['attn'].append(f"attn_{layer_idx}")
+                self.weight_copy_task["attn"].append(f"attn_{layer_idx}")
 
                 for expert_idx in range(self.model_config.num_local_experts):
-                    for name, _ in self.model.model.layers[layer_idx].block_sparse_moe.experts[expert_idx].named_parameters():
+                    for name, _ in (
+                        self.model.model.layers[layer_idx]
+                        .block_sparse_moe.experts[expert_idx]
+                        .named_parameters()
+                    ):
                         tensor_full_name = f"model.layers.{layer_idx}.block_sparse_moe.experts.{expert_idx}.{name}"
                         self.state_dict_name_map[tensor_full_name] = {
-                            "module_key": f"routed_expert_{layer_idx}_{expert_idx}", 
-                            "tensor_key": name
+                            "module_key": f"routed_expert_{layer_idx}_{expert_idx}",
+                            "tensor_key": name,
                         }
-                    self.weight_copy_task['routed_expert'].append(f"routed_expert_{layer_idx}_{expert_idx}")
-    
+                    self.weight_copy_task["routed_expert"].append(
+                        f"routed_expert_{layer_idx}_{expert_idx}"
+                    )
+
     def _config_attn_module(self):
         """
         - Configure the wrapper.
