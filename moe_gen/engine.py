@@ -21,13 +21,13 @@ import copy
 import functools
 import logging
 import math
-import torch.multiprocessing as mp
 import os
 import sys
 import time
 from typing import Callable, Dict, List, Optional
 
 import torch
+import torch.multiprocessing as mp
 from tqdm import tqdm
 from transformers import AutoConfig, AutoTokenizer
 
@@ -162,6 +162,7 @@ def moe_gen(
     try:
         logging.info("entering snapshot_download")
         from huggingface_hub import snapshot_download
+
         model_path = snapshot_download(
             huggingface_ckpt_name,
             cache_dir=hf_cache_dir,

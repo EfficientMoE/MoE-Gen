@@ -349,8 +349,10 @@ class Attn_Wrapper(torch.nn.Module):
                         #     self.weight_dequant_scale
                         # )
                         output = self.module.prefill_attn(
-                            cur_hidden_states, cur_attention_mask, position_ids,
-                        )                        
+                            cur_hidden_states,
+                            cur_attention_mask,
+                            position_ids,
+                        )
                         key_cache = output[1]
                         value_cache = torch.ones(
                             1,

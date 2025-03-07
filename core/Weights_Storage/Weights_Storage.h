@@ -38,13 +38,13 @@ struct tensor_buffer {
     int64_t byte_size;
 
     // default constructor
-    tensor_buffer() : data_ptr(nullptr), tensor_shape({}), byte_size(0){};
+    tensor_buffer() : data_ptr(nullptr), tensor_shape({}), byte_size(0) {};
     // constructor
     tensor_buffer(void* data_ptr, std::vector<int64_t> tensor_shape,
                   int64_t byte_size)
         : data_ptr(data_ptr),
           tensor_shape(tensor_shape),
-          byte_size(byte_size){};
+          byte_size(byte_size) {};
 };
 
 class Weights_Storage {
