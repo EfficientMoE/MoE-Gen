@@ -54,7 +54,7 @@ For example,  to efficiently serve DeepSeek-R1-6871B-FP8, 1TB Host memory is rec
 ### Create conda environment.
 
 ```bash
-conda env create --name moe_gen python=3.11
+conda create --name moe_gen python=3.11
 conda activate moe_gen
 ```
 
@@ -63,6 +63,7 @@ conda activate moe_gen
 ```bash
 # install nightly release
 pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ moe-gen
+pip install flash-attn==2.7.4.post1
 ```
 
 ## Quick Start
