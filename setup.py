@@ -96,7 +96,7 @@ print(f"find_packages: {find_packages()}")
 # install all files in the package, rather than just the egg
 setup(
     name="moe_gen",
-    version=os.getenv("MOEGEN_VERSION", "0.0.1"),
+    version=os.getenv("MOEGEN_VERSION", "0.1"),
     packages=find_packages(
         exclude=["op_builder", "op_builder.*", "external/*"],
         include=[
@@ -113,6 +113,7 @@ setup(
     include_package_data=True,
     install_requires=install_requires,
     author="EfficientMoE Team",
+    description="MoE-Gen is a library for High-throughput offline inference for MoE models with limited GPUs",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
     classifiers=[

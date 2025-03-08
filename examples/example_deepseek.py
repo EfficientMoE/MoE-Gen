@@ -41,6 +41,8 @@ if __name__ == "__main__":
 
     """
         Step 1: Select Model.
+        We recommend using the DeepSeek-V2-Lite-Chat model to get started.
+        Feel free to experiment with other models by changing the hugging_face_checkpoint variable with above supported models.
     """
     hugging_face_checkpoint = "deepseek-ai/DeepSeek-V2-Lite-Chat"
 
