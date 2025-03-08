@@ -1,5 +1,4 @@
 datasets==2.16.1
-flash-attn==2.7.4.post1
 ninja
 protobuf==6.30.0
 psutil==7.0.0
