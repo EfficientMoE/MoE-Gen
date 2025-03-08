@@ -26,8 +26,8 @@
 
 |               | DeepSeek-R1/V3 (671B-W8A16) | DeekSeek-V2 (236B-W16A16)|
 |:-------------:|:--------------------------:|:-----------------------:|
-| **SGLang**    | Not Support                | Not Support            |
-| **vLLM**      | Not Support                | 97 / 0.9               |
+| **SGLang**    | Not Supported                | Not Supported            |
+| **vLLM**      | Not Supported               | 97 / 0.9               |
 | **Llama.cpp** | 5.7 / 0.9                  | 23/1                   |
 | **MoE-Gen**   | **204/17**                 | **787/31**             |
 

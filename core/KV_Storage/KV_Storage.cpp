@@ -30,6 +30,7 @@
 #include "../data_structures.h"
 #include "../utils.h"
 #include "KV_Storage.h"
+#include "tqdm.hpp"
 
 KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
                        DtoH_Engine& d2h_engine)
@@ -50,11 +51,11 @@ KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
             this->engine_config_.kv_storage_config.storage_byte_size;
         auto per_layer_storage_size =
             storage_size / this->model_config_.num_hidden_layers;
+
+        auto bar = tq::trange(this->model_config_.num_hidden_layers);
         if (this->model_config_.model_type.find("deepseek") ==
             std::string::npos) {
-            for (int64_t layer_idx = 0;
-                 layer_idx < this->model_config_.num_hidden_layers;
-                 layer_idx++) {
+            for (auto layer_idx : bar) {
                 void* k_ptr = nullptr;
                 void* v_ptr = nullptr;
                 CUDA_CHECK(cudaHostAlloc(&k_ptr, per_layer_storage_size,
@@ -65,9 +66,7 @@ KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
                 this->v_pinned_memory.push_back(v_ptr);
             }
         } else {
-            for (int64_t layer_idx = 0;
-                 layer_idx < this->model_config_.num_hidden_layers;
-                 layer_idx++) {
+            for (auto layer_idx : bar) {
                 void* k_ptr = nullptr;
                 // void* v_ptr = nullptr;
                 CUDA_CHECK(cudaHostAlloc(&k_ptr, per_layer_storage_size,
