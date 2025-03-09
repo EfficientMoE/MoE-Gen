@@ -53,6 +53,7 @@ KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
             storage_size / this->model_config_.num_hidden_layers;
 
         auto bar = tq::trange(this->model_config_.num_hidden_layers);
+        bar.set_prefix("Allocating Pinned Memory for KV cache");
         if (this->model_config_.model_type.find("deepseek") ==
             std::string::npos) {
             for (auto layer_idx : bar) {
@@ -68,16 +69,9 @@ KV_Storage::KV_Storage(EngineConfig& engine_config, ModelConfig& model_config,
         } else {
             for (auto layer_idx : bar) {
                 void* k_ptr = nullptr;
-                // void* v_ptr = nullptr;
                 CUDA_CHECK(cudaHostAlloc(&k_ptr, per_layer_storage_size,
                                          cudaHostAllocDefault));
-                // memset
-                CUDA_CHECK(cudaMemset(k_ptr, 999, per_layer_storage_size));
-                // CUDA_CHECK(cudaHostAlloc(&v_ptr, per_layer_storage_size,
-                // cudaHostAllocDefault)); memset(k_ptr, 0,
-                // per_layer_storage_size);
                 this->k_pinned_memory.push_back(k_ptr);
-                // this->v_pinned_memory.push_back(v_ptr);
             }
         }
         this->logger_->info("KV Storage Pinned Memory Allocated.");
@@ -140,7 +134,6 @@ void KV_Storage::Init() {
             for (int64_t slot_idx = 0; slot_idx < num_slots; slot_idx++) {
                 this->k_storage[slot_idx].resize(
                     this->model_config_.num_hidden_layers);
-                // this->v_storage[slot_idx].resize(this->model_config_.num_hidden_layers);
                 this->empty_slots.insert(slot_idx);
                 for (int64_t layer_idx = 0;
                      layer_idx < this->model_config_.num_hidden_layers;
@@ -148,13 +141,8 @@ void KV_Storage::Init() {
                     this->k_storage[slot_idx][layer_idx].start_ptr =
                         this->k_pinned_memory[layer_idx] +
                         slot_idx * slot_byte_size;
-                    // this->v_storage[slot_idx][layer_idx].start_ptr =
-                    // this->v_pinned_memory[layer_idx] + slot_idx *
-                    // slot_byte_size;
                     this->k_storage[slot_idx][layer_idx].used_byte_size = 0;
-                    // this->v_storage[slot_idx][layer_idx].used_byte_size = 0;
                     this->k_storage[slot_idx][layer_idx].num_tokens = 0;
-                    // this->v_storage[slot_idx][layer_idx].num_tokens = 0;
                 }
             }
         }
@@ -186,22 +174,34 @@ void KV_Storage::Init() {
     }
 };
 
+// void KV_Storage::offload(int64_t layer_idx,
+//                          std::vector<int64_t> query_global_idx, torch::Tensor
+//                          k, torch::Tensor v) {
+//     try {
+//         auto worker = std::thread(&KV_Storage::offload_helper_, this,
+//         layer_idx,
+//                                   query_global_idx, k, v);
+//         worker.detach();
+//     } catch (const std::exception& e) {
+//         this->logger_->error(
+//             "KV_Storage - offload(): Failed to offload K and V to "
+//             "the storage. Error: {}",
+//             e.what());
+//         throw std::runtime_error(
+//             "KV_Storage - offload() : Failed to offload K and V to the "
+//             "storage.");
+//     }
+// };
 void KV_Storage::offload(int64_t layer_idx,
                          std::vector<int64_t> query_global_idx, torch::Tensor k,
                          torch::Tensor v) {
-    try {
-        auto worker = std::thread(&KV_Storage::offload_helper_, this, layer_idx,
-                                  query_global_idx, k, v);
-        worker.detach();
-    } catch (const std::exception& e) {
-        this->logger_->error(
-            "KV_Storage - offload(): Failed to offload K and V to "
-            "the storage. Error: {}",
-            e.what());
-        throw std::runtime_error(
-            "KV_Storage - offload() : Failed to offload K and V to the "
-            "storage.");
-    }
+    SAFE_CALL(
+        [&]() {
+            auto worker = std::thread(&KV_Storage::offload_helper_, this,
+                                      layer_idx, query_global_idx, k, v);
+            worker.detach();
+        },
+        this->logger_);
 };
 
 void KV_Storage::offload_helper_(int64_t layer_idx,
@@ -442,7 +442,8 @@ void KV_Storage::update_helper_(int64_t layer_idx,
                 v.size(1) * v.size(2) * v.size(3) * v.element_size();
             this->logger_->debug("k_token_byte_size: {}", k_token_byte_size);
             this->logger_->debug("v_token_byte_size: {}", v_token_byte_size);
-            for (int64_t i = 0; i < query_global_indices.size(); i++) {
+            for (int64_t i = 0;
+                 i < static_cast<int64_t>(query_global_indices.size()); i++) {
                 auto query_idx = query_global_indices[i];
                 auto device_k_ptr = k.data_ptr() + i * k_token_byte_size;
                 auto device_v_ptr = v.data_ptr() + i * v_token_byte_size;
@@ -562,7 +563,7 @@ std::vector<c10::BFloat16*> KV_Storage::get_k_ptrs(int64_t layer_idx,
                                                    std::vector<int64_t> batch) {
     try {
         std::vector<c10::BFloat16*> k_ptrs;
-        for (int64_t i = 0; i < batch.size(); i++) {
+        for (int64_t i = 0; i < static_cast<int64_t>(batch.size()); i++) {
             auto query_idx = batch[i];
             int64_t slot_idx = -1;
             {
@@ -577,11 +578,6 @@ std::vector<c10::BFloat16*> KV_Storage::get_k_ptrs(int64_t layer_idx,
                                              layer_idx]);
                 k_ptr = static_cast<c10::BFloat16*>(
                     this->k_storage[slot_idx][layer_idx].start_ptr);
-                // this->logger_->debug("layer_idx: {}, slot_idx: {},
-                // used_byte_size:
-                // {}, num_tokens: {}", layer_idx, slot_idx,
-                // this->k_storage[slot_idx][layer_idx].used_byte_size,
-                // this->k_storage[slot_idx][layer_idx].num_tokens);
             }
             k_ptrs.push_back(k_ptr);
         }
@@ -622,7 +618,7 @@ std::vector<c10::BFloat16*> KV_Storage::get_v_ptrs(int64_t layer_idx,
                                                    std::vector<int64_t> batch) {
     try {
         std::vector<c10::BFloat16*> v_ptrs;
-        for (int64_t i = 0; i < batch.size(); i++) {
+        for (int64_t i = 0; i < static_cast<int64_t>(batch.size()); i++) {
             auto query_idx = batch[i];
             int64_t slot_idx = -1;
             {
