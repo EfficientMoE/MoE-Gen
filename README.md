@@ -24,12 +24,12 @@
 
 <div align="center">
 
-|               | DeepSeek-R1/V3 (671B-W8A16) | DeekSeek-V2 (236B-W16A16)|
-|:-------------:|:--------------------------:|:-----------------------:|
-| **SGLang**    | Not Supported                | Not Supported            |
-| **vLLM**      | Not Supported               | 97 / 0.9               |
-| **Llama.cpp** | 5.7 / 0.9                  | 23/1                   |
-| **MoE-Gen**   | **204/17**                 | **787/31**             |
+|               | DeepSeek-R1/V3 (671B-W8A16)| DeekSeek-V2 (236B-W16A16)|Mixtral-8x22B (141B-W16A16)|Mixtral-8x7B (48B-W16A16)|
+|:-------------:|:--------------------------:|:-----------------------:|:-----------------------:|:-----------------------:|
+| **SGLang**    | Not Supported              | Not Supported           |Not Supported           |Not Supported           |
+| **vLLM**      | Not Supported              | 97 / 0.9                |147/2                   |1347/31|
+| **Llama.cpp** | 5.7/0.9                  | 23/1                    |110/2                   |328/4|
+| **MoE-Gen**   | **204/17**                 | **787/31**              |**907/91**              |**2790/469**|
 
 </div>
 
