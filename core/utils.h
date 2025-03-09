@@ -46,6 +46,26 @@
 #include <torch/torch.h>
 
 #include "data_structures.h"
+template <typename Func, typename Logger>
+inline void safeCall(Func&& func, Logger logger, const char* callerFunction) {
+    try {
+        func();
+    } catch (const c10::Error& e) {
+        logger->debug("{}: CUDA/PyTorch error: {}", callerFunction, e.what());
+        throw std::runtime_error(e.what());
+    } catch (const cudaError_t& err) {
+        logger->debug("{}: CUDA runtime error: {}", callerFunction,
+                      cudaGetErrorString(err));
+        throw std::runtime_error(cudaGetErrorString(err));
+    } catch (const std::exception& e) {
+        logger->debug("{}: Error: {}", callerFunction, e.what());
+        throw std::runtime_error(e.what());
+    } catch (...) {
+        logger->debug("{}:", callerFunction);
+        throw std::runtime_error("Unknown error");
+    }
+}
+#define SAFE_CALL(func, logger) safeCall(func, logger, __FUNCTION__)
 
 namespace py = pybind11;
 inline void throwOnCudaError(cudaError_t error, const char* file, int line,
