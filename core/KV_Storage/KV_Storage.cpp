@@ -174,24 +174,6 @@ void KV_Storage::Init() {
     }
 };
 
-// void KV_Storage::offload(int64_t layer_idx,
-//                          std::vector<int64_t> query_global_idx, torch::Tensor
-//                          k, torch::Tensor v) {
-//     try {
-//         auto worker = std::thread(&KV_Storage::offload_helper_, this,
-//         layer_idx,
-//                                   query_global_idx, k, v);
-//         worker.detach();
-//     } catch (const std::exception& e) {
-//         this->logger_->error(
-//             "KV_Storage - offload(): Failed to offload K and V to "
-//             "the storage. Error: {}",
-//             e.what());
-//         throw std::runtime_error(
-//             "KV_Storage - offload() : Failed to offload K and V to the "
-//             "storage.");
-//     }
-// };
 void KV_Storage::offload(int64_t layer_idx,
                          std::vector<int64_t> query_global_idx, torch::Tensor k,
                          torch::Tensor v) {
@@ -248,14 +230,10 @@ void KV_Storage::offload_helper_(int64_t layer_idx,
                     slot_idx = this->query_idx_to_slot_idx_map[query_idx];
                 }
 
-                // this->logger_->debug("slot_idx: {}", slot_idx);
                 auto host_k_ptr =
                     this->k_storage[slot_idx][layer_idx].start_ptr;
                 auto host_v_ptr =
                     this->v_storage[slot_idx][layer_idx].start_ptr;
-
-                // this->logger_->debug("host_k_ptr: {}, host_v_ptr: {}",
-                // host_k_ptr, host_v_ptr);
 
                 if (host_k_ptr == nullptr || host_v_ptr == nullptr) {
                     if (host_k_ptr == nullptr) {
@@ -310,9 +288,6 @@ void KV_Storage::offload_helper_(int64_t layer_idx,
             /* Step 1: Permute k and v in the device. */
             int64_t bsz = k.size(0);
             int64_t seq_len = k.size(1);
-            // this->logger_->debug("k.dim(): {}", k.dim());
-            // this->logger_->debug("k.size: {} {} {}", k.size(0), k.size(1),
-            // k.size(2));
             int64_t k_seq_byte_size = k.size(1) * k.size(2) * k.element_size();
             k = k.contiguous();
 
@@ -345,9 +320,6 @@ void KV_Storage::offload_helper_(int64_t layer_idx,
                 // this->logger_->debug("slot_idx: {}", slot_idx);
                 auto host_k_ptr =
                     this->k_storage[slot_idx][layer_idx].start_ptr;
-
-                // this->logger_->debug("host_k_ptr: {}, host_v_ptr: {}",
-                // host_k_ptr, host_v_ptr);
 
                 {
                     std::lock_guard<std::mutex> lock(
@@ -409,12 +381,9 @@ void KV_Storage::update(int64_t layer_idx,
                         std::vector<int64_t> query_global_indices,
                         torch::Tensor k, torch::Tensor v) {
     try {
-        // k = k.to(this->engine_config_.basic_config.dtype_torch);
-        // v = v.to(this->engine_config_.basic_config.dtype_torch);
         auto worker = std::thread(&KV_Storage::update_helper_, this, layer_idx,
                                   query_global_indices, k, v);
         worker.detach();
-        // this->update_helper_(layer_idx, query_global_indices, k, v);
     } catch (const std::exception& e) {
         this->logger_->debug(
             "KV_Storage update(): Failed to update K and V to the "
@@ -490,8 +459,6 @@ void KV_Storage::update_helper_(int64_t layer_idx,
             CUDA_CHECK(cudaStreamSynchronize(this->d2h_engine_.DtoH_stream));
         } else {
             if ((k.dtype() != torch::kBFloat16)) {
-                // this->logger_->debug("KV_Storage update_helper_(): k.dtype:
-                // {}, v.dtype: {}", k.dtype());
                 throw std::runtime_error(
                     "KV_Storage update_helper_(): k.dtype and "
                     "v.dtype should be torch::kBFloat16.");
