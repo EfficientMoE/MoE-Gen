@@ -160,13 +160,14 @@ python example.py
 
 
 ## Citation
-```bash
-@inproceedings{xu2025moegenhighthroughputmoeinference,
-      title={MoE-Gen: High-Throughput MoE Inference on a Single GPU with Module-Based Batching},
+```
+@misc{xu2025moegenhighthroughputmoeinference,
+      title={MoE-Gen: High-Throughput MoE Inference on a Single GPU with Module-Based Batching}, 
       author={Tairan Xu and Leyang Xue and Zhan Lu and Adrian Jackson and Luo Mai},
       year={2025},
       eprint={2503.09716},
       archivePrefix={arXiv},
       primaryClass={cs.DC},
-      url={https://arxiv.org/abs/2503.09716},
+      url={https://arxiv.org/abs/2503.09716}, 
 }
+```
