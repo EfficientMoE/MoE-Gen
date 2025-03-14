@@ -5,7 +5,7 @@
 </div>
 
 # Latest News
-- [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture.
+- [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
 
 # Supported Models
 - **DeepSeek-R1/V3-671B. FULL Precision.**
@@ -16,6 +16,7 @@
 - MoE model evaluation.
 - Company deployed LLM workflow for raw data formation.
 - Latency-insensitive bulk inference tasks. Such as large batch inference launched in valley period.
+- Deep-research applications. Deliver high-quality results overnight.
 
 ## Performance
 
@@ -124,8 +125,8 @@ if __name__ == "__main__":
         queries=queries,
         max_input_length=512,
         max_decoding_length=32,
-        device=[0],
-        host_kv_cache_size=10 #in GB
+        device=[0], # Can also use multiple devices to enable data parallel, e.g.[0,1,2,3]
+        host_kv_cache_size=10 #in GB, reserved CPU memory for KV-cache
     )
 
 
@@ -159,3 +160,12 @@ python example.py
 
 
 ## Citation
+@inproceedings{xu2025moegenhighthroughputmoeinference,
+      title={MoE-Gen: High-Throughput MoE Inference on a Single GPU with Module-Based Batching},
+      author={Tairan Xu and Leyang Xue and Zhan Lu and Adrian Jackson and Luo Mai},
+      year={2025},
+      eprint={2503.09716},
+      archivePrefix={arXiv},
+      primaryClass={cs.DC},
+      url={https://arxiv.org/abs/2503.09716},
+}
