@@ -170,4 +170,3 @@ python example.py
       primaryClass={cs.DC},
       url={https://arxiv.org/abs/2503.09716},
 }
-```
