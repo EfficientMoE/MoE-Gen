@@ -35,8 +35,8 @@ try:
     from moe_gen.core_engine import Parameter_Server
 except ImportError:
     # jit compile
-    from moe_gen.models.engine_loader import core_engine
-    from core_engine import Parameter_Server
+    from moe_gen.models.engine_loader import core_engine #noqa
+    from core_engine import Parameter_Server #noqa
 
     
 
