@@ -1035,16 +1035,16 @@ class DeepSeek_Initializer:
 				"Post_Attn",
 				types.MethodType(_Post_Attn, attn_module),
 			)
-			# setattr(
-			# 	attn_module,
-			# 	"decoding_attn",
-			# 	types.MethodType(decoding_attn, attn_module),
-			# )
 			setattr(
 				attn_module,
 				"decoding_attn",
-				types.MethodType(cus_absorbed_mla_decoding_forward, attn_module),
+				types.MethodType(decoding_attn, attn_module),
 			)
+			# setattr(
+			# 	attn_module,
+			# 	"decoding_attn",
+			# 	types.MethodType(cus_absorbed_mla_decoding_forward, attn_module),
+			# )
 			setattr(
 				attn_module,
 				"prefill_attn",
