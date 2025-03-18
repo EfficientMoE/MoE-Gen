@@ -257,8 +257,12 @@ torch::Tensor Hetero_Attn::_attn_mode_1(
             std::vector<int64_t> tensor_shape = {
                 bsz, kv_seq_len, this->model_config_.compressed_kv_dim};
 
-            auto cur_k = this->gpu_kv_buffer_.get_k(layer_idx, micro_batch_idx,
-                                                    tensor_shape).clone();
+            auto external_tensor = this->gpu_kv_buffer_.get_k(layer_idx, micro_batch_idx,
+                                                    tensor_shape);
+            auto cur_k = torch::empty_like(external_tensor);
+            cur_k.copy_(external_tensor);
+            CUDA_CHECK(cudaStreamSynchronize(0));
+
             this->gpu_kv_buffer_.releaseBuffer(layer_idx, micro_batch_idx);
 
             int64_t cur_batch_start_idx = 0;
