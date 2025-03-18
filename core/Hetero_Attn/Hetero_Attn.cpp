@@ -280,28 +280,26 @@ torch::Tensor Hetero_Attn::_attn_mode_1(
                          .memory_format(torch::MemoryFormat::Contiguous));
             std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
                 module_output;
-            {
-                py::gil_scoped_acquire acquire;
-                module_output =
-                    PyTorch_attn_module
-                        .attr("decoding_attn")(
-                            cur_hidden_states, cur_k, cur_v,
-                            attention_mask.index({torch::indexing::Slice(
-                                cur_batch_start_idx,
-                                cur_batch_start_idx + cur_batch_size)}),
-                            position_ids.index({torch::indexing::Slice(
-                                cur_batch_start_idx,
-                                cur_batch_start_idx + cur_batch_size)}))
-                        .cast<std::tuple<torch::Tensor, torch::Tensor,
-                                         torch::Tensor>>();
-                py::gil_scoped_release release;
-            }
+
+            module_output =
+                PyTorch_attn_module
+                    .attr("decoding_attn")(
+                        cur_hidden_states, cur_k, cur_v,
+                        attention_mask.index({torch::indexing::Slice(
+                            cur_batch_start_idx,
+                            cur_batch_start_idx + cur_batch_size)}),
+                        position_ids.index({torch::indexing::Slice(
+                            cur_batch_start_idx,
+                            cur_batch_start_idx + cur_batch_size)}))
+                    .cast<std::tuple<torch::Tensor, torch::Tensor,
+                                        torch::Tensor>>();
+
             CUDA_CHECK(cudaStreamSynchronize(0));
 
             auto [attn_result, new_k, new_v] = module_output;
             this->gpu_kv_buffer_.releaseBuffer(layer_idx, micro_batch_idx);
             this->kv_storage_.update(layer_idx, cur_batch, new_k,
-                                     new_v);  // Todo.
+                                     new_v); 
             // CUDA_CHECK(cudaStreamSynchronize(0));
             // CUDA_CHECK(cudaDeviceSynchronize());
             // result.push_back(attn_result);

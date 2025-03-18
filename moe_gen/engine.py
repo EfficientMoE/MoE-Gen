@@ -679,9 +679,7 @@ class MoE_Gen:
         """
         self.set_phase("prefill")
         self.core_engine.clear_weight_copy_queue()
-        # time.sleep(1)
         self.core_engine.reset_prefill_buffer()
-        # time.sleep(1)
         self.core_engine.reset_weight_copy_queue()
 
         logging.info("Weight buffer cleared.")
