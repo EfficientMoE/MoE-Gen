@@ -466,14 +466,21 @@ def cus_absorbed_mla_decoding_forward(
 	compressed_kv, k_pe = torch.split(
 		compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
 	)
+	compressed_kv = self.kv_a_layernorm(compressed_kv)
+
 	k_pe = k_pe.view(bsz, 1, kv_len, self.qk_rope_head_dim)
+	cos, sin = self.rotary_emb(k_pe, seq_len=kv_len)
+	k_pe = rotary_pos_emb(k_pe, cos, sin, position_ids)
+
 	
 	kv_b_proj = self.kv_b_proj.weight.view(self.num_heads, -1, self.kv_lora_rank)
 	q_absorb = kv_b_proj[:, :self.qk_nope_head_dim,:]
 	out_absorb = kv_b_proj[:, self.qk_nope_head_dim:, :]
 	
-	cos, sin = self.rotary_emb(q_pe, seq_len=q_len)
-	q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids)
+	# cos, sin = self.rotary_emb(q_pe, seq_len=q_len)
+	# q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids)
+	q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids[:, -1].unsqueeze(-1))
+	
 
 	q_nope = torch.matmul(q_nope, q_absorb) 
 	attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
