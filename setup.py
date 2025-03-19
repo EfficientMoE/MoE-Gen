@@ -108,6 +108,14 @@ setup(
         ],
     ),
     package_data={
+        "moe_gen": [
+            "**/*.cpp",
+            "**/*.h",
+            "**/*.cc",
+            "**/*.hpp",
+            "**/*.py",
+            "**/*.so",
+        ],
         "moe_gen.core_engine": ["**/*.so"],
     },
     include_package_data=True,
