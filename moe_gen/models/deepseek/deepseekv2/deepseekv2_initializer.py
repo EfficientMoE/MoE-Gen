@@ -170,9 +170,6 @@ def prefill_attn(
 	attention_mask: torch.Tensor,
 	position_ids: torch.Tensor,
 ):
-	start = torch.cuda.Event(enable_timing=True)
-	end = torch.cuda.Event(enable_timing=True)
-	start.record()
 	bsz, q_len, _ = hidden_states.size()
 	if self.q_lora_rank is None:
 		q = self.q_proj(hidden_states)
@@ -221,6 +218,7 @@ def prefill_attn(
 		torch.matmul(query_states, key_states.transpose(2, 3))
 		* self.softmax_scale
 	)
+
 	if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
 		raise ValueError(
 			f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
@@ -241,8 +239,8 @@ def prefill_attn(
 	attn_weights = nn.functional.dropout(
 		attn_weights, p=self.attention_dropout, training=self.training
 	)
-	attn_output = torch.matmul(attn_weights, value_states)
 
+	attn_output = torch.matmul(attn_weights, value_states)
 	if attn_output.size() != (bsz, self.num_heads, q_len, self.v_head_dim):
 		raise ValueError(
 			f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.v_head_dim)}, but is"
@@ -256,9 +254,6 @@ def prefill_attn(
 	)
 
 	attn_output = self.o_proj(attn_output)
-	end.record()
-	torch.cuda.synchronize(attn_output.device)
-	logging.info(f"prefill_attn time in ms: {start.elapsed_time(end)}")
 	return attn_output, new_compressed_kv
 
 
@@ -416,7 +411,6 @@ def cus_absorbed_mla_prefill_forward(
 	torch.cuda.synchronize(hidden_states.device)
 	logging.info(f"cus_absorbed_mla_prefill_forward get compressed_kv time in ms: {start.elapsed_time(end)}")
 
-	start.record()
 	kv_seq_len = hidden_states.size(1)
 	k_pe = k_pe.view(bsz, kv_seq_len, 1, self.qk_rope_head_dim).transpose(1, 2)
 	cos, sin = self.rotary_emb(k_pe, seq_len=kv_seq_len)
@@ -427,26 +421,50 @@ def cus_absorbed_mla_prefill_forward(
 	q_absorb = kv_b_proj[:, :self.qk_nope_head_dim,:]
 	out_absorb = kv_b_proj[:, self.qk_nope_head_dim:, :]
 	
-	# cos, sin = self.rotary_emb(q_pe, seq_len=q_len)
-	# q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids)
-
+	start.record()
 	q_nope = torch.matmul(q_nope, q_absorb) 
-	attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
+	end.record()
+	torch.cuda.synchronize(hidden_states.device)
+	logging.info(f"cus_absorbed_mla_prefill_forward time q_nope in ms: {start.elapsed_time(end)}")
+
+	start.record()
+	# attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
+	attn_weights = torch.einsum('bhqd,bhcd->bhqc', q_pe, k_pe)
+	# attn_weights = torch.matmul(q_pe, k_pe.permute(0, 1, 3, 2))
+	attn_weights = attn_weights + torch.einsum('bhqd,bhcd->bhqc', q_nope, compressed_kv.unsqueeze(-3))
+	# attn_weights = attn_weights + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).permute(0, 1, 3, 2))
+	attn_weights = attn_weights * self.softmax_scale
+	end.record()
+	torch.cuda.synchronize(hidden_states.device)
+	logging.info(f"cus_absorbed_mla_prefill_forward time attn_weights in ms: {start.elapsed_time(end)}")
 	if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
 		raise ValueError(
 			f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
 			f" {attn_weights.size()}"
 		)
+
+	start.record()
 	attn_weights = attn_weights + attention_mask
+	end.record()
+	torch.cuda.synchronize(hidden_states.device)
+	logging.info(f"cus_absorbed_mla_prefill_forward time add mask in ms: {start.elapsed_time(end)}")
 	# upcast attention to fp32
+	
+	start.record()
 	attn_weights = nn.functional.softmax(
 		attn_weights, dim=-1, dtype=torch.float32
 	).to(q_nope.dtype)
-	attn_output = torch.einsum('bhql,blc->bhqc', attn_weights, compressed_kv)
-	attn_output = torch.matmul(attn_output, out_absorb.mT) # torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
 	end.record()
 	torch.cuda.synchronize(hidden_states.device)
-	logging.info(f"cus_absorbed_mla_prefill_forward time attn_outoput in ms: {start.elapsed_time(end)}")
+	logging.info(f"cus_absorbed_mla_prefill_forward time softmax in ms: {start.elapsed_time(end)}")
+
+	start.record()
+	attn_output = torch.einsum('bhql,blc->bhqc', attn_weights, compressed_kv)
+	# attn_output = torch.matmul(attn_output, out_absorb.mT) # torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
+	attn_output = torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
+	end.record()
+	torch.cuda.synchronize(hidden_states.device)
+	logging.info(f"cus_absorbed_mla_prefill_forward time einsum in ms: {start.elapsed_time(end)}")
 
 	start.record()
 	if attn_output.size() != (bsz, self.num_heads, q_len, self.v_head_dim):
@@ -497,6 +515,7 @@ def cus_absorbed_mla_decoding_forward(
 	k_pe = k_pe.view(bsz, 1, kv_len, self.qk_rope_head_dim)
 	cos, sin = self.rotary_emb(k_pe, seq_len=kv_len)
 	k_pe = rotary_pos_emb(k_pe, cos, sin, position_ids)
+	# q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
 
 	
 	kv_b_proj = self.kv_b_proj.weight.view(self.num_heads, -1, self.kv_lora_rank)
@@ -509,7 +528,10 @@ def cus_absorbed_mla_decoding_forward(
 	
 
 	q_nope = torch.matmul(q_nope, q_absorb) 
-	attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
+	# attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
+	attn_weights = torch.einsum('bhqd,bhcd->bhqc', q_pe, k_pe)
+	attn_weights = attn_weights + torch.einsum('bhqd,bhcd->bhqc', q_nope, compressed_kv.unsqueeze(-3))
+	attn_weights = attn_weights * self.softmax_scale
 	if attn_weights.size() != (bsz, self.num_heads, q_len, kv_len):
 		raise ValueError(
 			f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_len)}, but is"
@@ -1061,33 +1083,33 @@ class DeepSeek_Initializer:
 				"Post_Attn",
 				types.MethodType(_Post_Attn, attn_module),
 			)
-			setattr(
-				attn_module,
-				"decoding_attn",
-				types.MethodType(decoding_attn, attn_module),
-			)
 			# setattr(
 			# 	attn_module,
 			# 	"decoding_attn",
-			# 	types.MethodType(cus_absorbed_mla_decoding_forward, attn_module),
+			# 	types.MethodType(decoding_attn, attn_module),
 			# )
+			setattr(
+				attn_module,
+				"decoding_attn",
+				types.MethodType(cus_absorbed_mla_decoding_forward, attn_module),
+			)
 			
-			# setattr(
-			# 	attn_module,
-			# 	"prefill_attn",
-			# 	types.MethodType(prefill_attn, attn_module),
-			# )
+			setattr(
+				attn_module,
+				"prefill_attn",
+				types.MethodType(prefill_attn, attn_module),
+			)
 			setattr(
 				attn_module,
 				"compress_kv",
 				types.MethodType(compress_kv, attn_module),
 			)
-			setattr(
-				attn_module,
-				"prefill_attn",
-				types.MethodType(cus_absorbed_mla_prefill_forward, attn_module
-				),
-			)
+			# setattr(
+			# 	attn_module,
+			# 	"prefill_attn",
+			# 	types.MethodType(cus_absorbed_mla_prefill_forward, attn_module
+			# 	),
+			# )
 			if "attn_" + str(layer_idx) in self.weight_copy_task["attn"]:
 				get_weights = True
 			else:
