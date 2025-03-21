@@ -5,6 +5,7 @@
 </div>
 
 # Latest News
+- [2025-03-21] Integrated mat absorbtion for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. 
 - [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
 
 # Supported Models
@@ -30,7 +31,7 @@
 | **SGLang**    | Not Supported              | Not Supported           |Not Supported           |Not Supported           |
 | **vLLM**      | Not Supported              | 97 / 0.9                |147/2                   |1347/31|
 | **Llama.cpp** | 5.7/0.9                  | 23/1                    |110/2                   |328/4|
-| **MoE-Gen**   | **204/17**                 | **787/31**              |**907/91**              |**2790/469**|
+| **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|
 
 </div>
 
@@ -88,6 +89,9 @@ if __name__ == "__main__":
         2. DeepSeek-V3 Architecture:
             * deepseek-ai/DeepSeek-R1
             * deepseek-ai/DeepSeek-V3
+        3. Mixtral:
+            * mistralai/Mixtral-8x7B-Instruct-v0.1
+            * mistralai/Mixtral-8x22B-Instruct-v0.1
     """
 
 

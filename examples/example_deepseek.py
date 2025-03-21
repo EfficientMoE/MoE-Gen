@@ -37,6 +37,9 @@ if __name__ == "__main__":
         2. DeepSeek-V3 Architecture:
             * deepseek-ai/DeepSeek-R1
             * deepseek-ai/DeepSeek-V3
+        3. Mixtral:
+            * mistralai/Mixtral-8x7B-Instruct-v0.1
+            * mistralai/Mixtral-8x22B-Instruct-v0.1
     """
 
     """
