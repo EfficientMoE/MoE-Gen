@@ -5,7 +5,7 @@
 </div>
 
 # Latest News
-- [2025-03-21] Integrated mat absorbtion for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. 
+- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s.
 - [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
 
 # Supported Models

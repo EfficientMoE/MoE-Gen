@@ -257,8 +257,8 @@ torch::Tensor Hetero_Attn::_attn_mode_1(
             std::vector<int64_t> tensor_shape = {
                 bsz, kv_seq_len, this->model_config_.compressed_kv_dim};
 
-            auto external_tensor = this->gpu_kv_buffer_.get_k(layer_idx, micro_batch_idx,
-                                                    tensor_shape);
+            auto external_tensor = this->gpu_kv_buffer_.get_k(
+                layer_idx, micro_batch_idx, tensor_shape);
             auto cur_k = torch::empty_like(external_tensor);
             cur_k.copy_(external_tensor);
             CUDA_CHECK(cudaStreamSynchronize(0));
@@ -295,13 +295,12 @@ torch::Tensor Hetero_Attn::_attn_mode_1(
                             cur_batch_start_idx,
                             cur_batch_start_idx + cur_batch_size)}))
                     .cast<std::tuple<torch::Tensor, torch::Tensor,
-                                        torch::Tensor>>();
+                                     torch::Tensor>>();
 
             CUDA_CHECK(cudaStreamSynchronize(0));
 
             auto [attn_result, new_k, new_v] = module_output;
-            this->kv_storage_.update(layer_idx, cur_batch, new_k,
-                                     new_v); 
+            this->kv_storage_.update(layer_idx, cur_batch, new_k, new_v);
             // CUDA_CHECK(cudaStreamSynchronize(0));
             // CUDA_CHECK(cudaDeviceSynchronize());
             // result.push_back(attn_result);
