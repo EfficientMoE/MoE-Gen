@@ -420,16 +420,15 @@ def prefill_attn(
         q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
     )
     compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
-    new_compressed_kv = compressed_kv.clone()
 
     kv_len = compressed_kv.size(1)
     assert kv_len == attention_mask.size(-1)
-    compressed_kv, k_pe = torch.split(
+    compressed_kv_ref, k_pe = torch.split(
         compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
     )
     k_pe = k_pe.view(bsz, kv_len, 1, self.qk_rope_head_dim).transpose(1, 2)
     kv = (
-        self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
+        self.kv_b_proj(self.kv_a_layernorm(compressed_kv_ref))
         .view(
             bsz, kv_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim
         )
@@ -493,7 +492,7 @@ def prefill_attn(
     )
 
     attn_output = self.o_proj(attn_output)
-    return attn_output, new_compressed_kv
+    return attn_output, compressed_kv
 
 
 @torch.no_grad()
@@ -517,18 +516,17 @@ def decoding_attn(
     )
 
     compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
-    new_compressed_kv = compressed_kv.clone()
 
     assert past_key_states.dtype == torch.bfloat16
-    compressed_kv = torch.cat([past_key_states, compressed_kv], dim=1)
-    kv_len = compressed_kv.size(1)
+    compressed_kv_ref = torch.cat([past_key_states, compressed_kv], dim=1)
+    kv_len = compressed_kv_ref.size(1)
     assert kv_len == attention_mask.size(-1)
-    compressed_kv, k_pe = torch.split(
-        compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
+    compressed_kv_ref, k_pe = torch.split(
+        compressed_kv_ref, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
     )
     k_pe = k_pe.view(bsz, kv_len, 1, self.qk_rope_head_dim).transpose(1, 2)
     kv = (
-        self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
+        self.kv_b_proj(self.kv_a_layernorm(compressed_kv_ref))
         .view(
             bsz, kv_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim
         )
@@ -598,7 +596,7 @@ def decoding_attn(
 
     return (
         attn_output,
-        new_compressed_kv,
+        compressed_kv,
         torch.tensor([], device=hidden_states.device),
     )
 
@@ -624,16 +622,15 @@ def cus_absorbed_mla_decoding_forward(
     )
 
     compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
-    new_compressed_kv = compressed_kv.clone()
 
     # past_key_states = past_key_states.to(torch.bfloat16)
-    compressed_kv = torch.cat([past_key_states, compressed_kv], dim=1)
-    kv_len = compressed_kv.size(1)
+    compressed_kv_ref = torch.cat([past_key_states, compressed_kv], dim=1)
+    kv_len = compressed_kv_ref.size(1)
     assert kv_len == attention_mask.size(-1)
-    compressed_kv, k_pe = torch.split(
-        compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
+    compressed_kv_ref, k_pe = torch.split(
+        compressed_kv_ref, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
     )
-    compressed_kv = self.kv_a_layernorm(compressed_kv)
+    compressed_kv_ref = self.kv_a_layernorm(compressed_kv_ref)
 
     k_pe = k_pe.view(bsz, 1, kv_len, self.qk_rope_head_dim)
     cos, sin = self.rotary_emb(k_pe, seq_len=kv_len)
@@ -654,7 +651,7 @@ def cus_absorbed_mla_decoding_forward(
     # attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
     attn_weights = torch.einsum("bhqd,bhcd->bhqc", q_pe, k_pe)
     attn_weights = attn_weights + torch.einsum(
-        "bhqd,bhcd->bhqc", q_nope, compressed_kv.unsqueeze(-3)
+        "bhqd,bhcd->bhqc", q_nope, compressed_kv_ref.unsqueeze(-3)
     )
     attn_weights = attn_weights * self.softmax_scale
     if attn_weights.size() != (bsz, self.num_heads, q_len, kv_len):
@@ -667,7 +664,7 @@ def cus_absorbed_mla_decoding_forward(
     attn_weights = nn.functional.softmax(
         attn_weights, dim=-1, dtype=torch.float32
     ).to(q_nope.dtype)
-    attn_output = torch.einsum("bhql,blc->bhqc", attn_weights, compressed_kv)
+    attn_output = torch.einsum("bhql,blc->bhqc", attn_weights, compressed_kv_ref)
     attn_output = torch.matmul(
         attn_output, out_absorb.mT
     )  # torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
@@ -686,7 +683,7 @@ def cus_absorbed_mla_decoding_forward(
 
     return (
         attn_output,
-        new_compressed_kv,
+        compressed_kv,
         torch.tensor([], device=hidden_states.device),
     )
 

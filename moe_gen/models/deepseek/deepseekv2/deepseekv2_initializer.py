@@ -442,7 +442,7 @@ def cus_absorbed_mla_decoding_forward(
     attn_weights = nn.functional.softmax(
         attn_weights, dim=-1, dtype=torch.float32
     ).to(q_nope.dtype)
-    attn_output = torch.einsum("bhql,blc->bhqc", attn_weights, compressed_kv)
+    attn_output = torch.einsum("bhql,blc->bhqc", attn_weights, compressed_kv_ref)
     attn_output = torch.matmul(
         attn_output, out_absorb.mT
     )  # torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
