@@ -626,7 +626,7 @@ class DeepSeek_Initializer:
 				self.host_kv_cache_byte_size
 				// self.engine_config.KV_Storage_Config.slot_byte_size
 				// self.model_config.num_hidden_layers
-			)
+			) 
 			self.engine_config.KV_Storage_Config.storage_byte_size = (
 				self.host_kv_cache_byte_size
 			)

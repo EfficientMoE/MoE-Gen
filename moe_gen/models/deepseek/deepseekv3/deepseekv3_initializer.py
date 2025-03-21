@@ -602,6 +602,86 @@ def decoding_attn(
         torch.tensor([], device=hidden_states.device),
     )
 
+@torch.no_grad()
+def cus_absorbed_mla_decoding_forward(
+	self,
+	hidden_states: torch.Tensor,
+	past_key_states: torch.Tensor,
+	past_value_states: torch.Tensor,
+	attention_mask: torch.Tensor,
+	position_ids: torch.Tensor,
+):
+	bsz, q_len, _ = hidden_states.size()
+
+	if self.q_lora_rank is None:
+		q = self.q_proj(hidden_states)
+	else:
+		q = self.q_b_proj(self.q_a_layernorm(self.q_a_proj(hidden_states)))
+	q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
+	q_nope, q_pe = torch.split(
+		q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
+	)
+
+	compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
+	new_compressed_kv = compressed_kv.clone()
+
+	# past_key_states = past_key_states.to(torch.bfloat16)
+	compressed_kv = torch.cat([past_key_states, compressed_kv], dim=1)
+	kv_len = compressed_kv.size(1)
+	assert kv_len == attention_mask.size(-1)
+	compressed_kv, k_pe = torch.split(
+		compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
+	)
+	compressed_kv = self.kv_a_layernorm(compressed_kv)
+
+	k_pe = k_pe.view(bsz, 1, kv_len, self.qk_rope_head_dim)
+	cos, sin = self.rotary_emb(k_pe, seq_len=kv_len)
+	k_pe = rotary_pos_emb(k_pe, cos, sin, position_ids)
+	# q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
+
+	
+	kv_b_proj = self.kv_b_proj.weight.view(self.num_heads, -1, self.kv_lora_rank)
+	q_absorb = kv_b_proj[:, :self.qk_nope_head_dim,:]
+	out_absorb = kv_b_proj[:, self.qk_nope_head_dim:, :]
+	
+	# cos, sin = self.rotary_emb(q_pe, seq_len=q_len)
+	# q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids)
+	q_pe = rotary_pos_emb(q_pe, cos, sin, position_ids[:, -1].unsqueeze(-1))
+	
+
+	q_nope = torch.matmul(q_nope, q_absorb) 
+	# attn_weights = (torch.matmul(q_pe, k_pe.mT) + torch.matmul(q_nope, compressed_kv.unsqueeze(-3).mT)) * self.softmax_scale
+	attn_weights = torch.einsum('bhqd,bhcd->bhqc', q_pe, k_pe)
+	attn_weights = attn_weights + torch.einsum('bhqd,bhcd->bhqc', q_nope, compressed_kv.unsqueeze(-3))
+	attn_weights = attn_weights * self.softmax_scale
+	if attn_weights.size() != (bsz, self.num_heads, q_len, kv_len):
+		raise ValueError(
+			f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_len)}, but is"
+			f" {attn_weights.size()}"
+		)
+	attn_weights = attn_weights + attention_mask
+	# upcast attention to fp32
+	attn_weights = nn.functional.softmax(
+		attn_weights, dim=-1, dtype=torch.float32
+	).to(q_nope.dtype)
+	attn_output = torch.einsum('bhql,blc->bhqc', attn_weights, compressed_kv)
+	attn_output = torch.matmul(attn_output, out_absorb.mT) # torch.einsum('bhqc,hdc->bhqd', attn_output, out_absorb)
+
+	if attn_output.size() != (bsz, self.num_heads, q_len, self.v_head_dim):
+		raise ValueError(
+			f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.v_head_dim)}, but is"
+			f" {attn_output.size()}"
+		)
+
+	attn_output = attn_output.transpose(1, 2).contiguous()
+	attn_output = attn_output.reshape(bsz, q_len, self.num_heads * self.v_head_dim)
+	attn_output = self.o_proj(attn_output)
+
+	return (
+		attn_output,
+		new_compressed_kv,
+		torch.tensor([], device=hidden_states.device),
+	)
 
 def deepseek_v3_dequantization(
     weight_data_fp8: torch.Tensor,
@@ -1085,10 +1165,15 @@ class DeepSeek_Initializer:
                 "Post_Attn",
                 types.MethodType(_Post_Attn, attn_module),
             )
+            # setattr(
+            #     attn_module,
+            #     "decoding_attn",
+            #     types.MethodType(decoding_attn, attn_module),
+            # )
             setattr(
                 attn_module,
                 "decoding_attn",
-                types.MethodType(decoding_attn, attn_module),
+                types.MethodType(cus_absorbed_mla_decoding_forward, attn_module),
             )
             setattr(
                 attn_module,
