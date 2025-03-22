@@ -7,11 +7,24 @@ on:
       - dev
       - release*
       - prepare-for-open-source
+
+    paths-ignore:
+      - '**.md'
+      - 'examples/**'
+      - 'tests/**'
+      - 'docs/**'
+
   pull_request:
     branches:
       - master
       - dev
       - release*
+
+    paths-ignore:
+      - '**.md'
+      - 'examples/**'
+      - 'tests/**'
+      - 'docs/**'
 
 jobs:
   build:
