@@ -670,12 +670,12 @@ class DeepSeek_Initializer:
                 self.engine_config.Basic_Config.max_decoding_length
                 + self.engine_config.Basic_Config.padding_length
             )
-            if context_length > 544:
+            if context_length > 768:
                 self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = math.floor(
-                    10 * 544 / context_length
+                    10 * 768 / context_length
                 )
                 self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = math.floor(
-                    20 * 544 / context_length
+                    20 * 768 / context_length
                 )
             else:
                 self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = 10
@@ -688,9 +688,9 @@ class DeepSeek_Initializer:
             )
             self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 2048
 
-            if context_length > 544:
+            if context_length > 768:
                 self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = math.floor(
-                    60 * 544 / context_length
+                    60 * 768 / context_length
                 )
             else:
                 self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = 60

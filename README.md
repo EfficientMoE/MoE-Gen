@@ -40,13 +40,26 @@ MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-E
 | **SGLang**    | Not Supported              | Not Supported           |Not Supported           |Not Supported           |
 | **vLLM**      | Not Supported              | 97 / 0.9                |147/2                   |1347/31|
 | **Llama.cpp** | 5.7/0.9                  | 23/1                    |110/2                   |328/4|
-| **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|
+| **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|  
+</div>  
+
+
+
+**4xA5000 + 1TB Host Memory.** Prompt length 512 tokens, decoding length 256 tokens. Prefill/decoding throughput in tokens/s.
+
+<div align="center">
+
+|               | DeepSeek-R1/V3 (671B-W8A16)| DeekSeek-V2 (236B-W16A16)|
+|:-------------:|:--------------------------:|:-----------------------:|
+| **SGLang**    | Not Supported              | Not Supported           |
+| **vLLM**      | Not Supported              | 97 / 0.9                |
+| **MoE-Gen**   | **204/27**                 | **2188/196**              |
 
 </div>
 
 ## Release Plan
 
-* Integrate DeepSeek FlashMLA and DeepGEMM.
+* Integrate speculative decoding for DeepSeek-R1.
 * Optimization on Ada and Hopper architecture.
 * Support moonshotai/Moonlight MoE.
 
