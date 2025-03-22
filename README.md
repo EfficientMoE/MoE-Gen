@@ -5,8 +5,8 @@
 </div>
 
 # Latest News
-- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. On 4xA5000 + 1TB host memory, DeepSeek-V2-236B Prefill.Decoding: 2925/196 tokens/s.
-- [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
+- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. On 4xA5000 + 1TB host memory, DeepSeek-V2-236B Prefill.Decoding: 3150/196 tokens/s.
+- [2025-03] MoE-Gen V0.1 release. Empower **DeepSeek-R1-671B NO-Quantization** inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. Data parallel on multiple devices supported.
 
 # About
 MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-Expert(MoE)** based large language models. It is tailored for bulk **offline inference** tasks and **limited GPU resources**. It enables low cost serving for latency-insensitive applications.
