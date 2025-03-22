@@ -9,7 +9,7 @@
 - [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
 
 # About
-MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-Expert(MoE)** based large language models. It is tailored for bulk **offline inference** tasks and **limited GPU resources**. It enables low cost serving for latency-insensitive applications. 
+MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-Expert(MoE)** based large language models. It is tailored for bulk **offline inference** tasks and **limited GPU resources**. It enables low cost serving for latency-insensitive applications.
 
 **Core Features**
 
@@ -40,8 +40,8 @@ MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-E
 | **SGLang**    | Not Supported              | Not Supported           |Not Supported           |Not Supported           |
 | **vLLM**      | Not Supported              | 97 / 0.9                |147/2                   |1347/31|
 | **Llama.cpp** | 5.7/0.9                  | 23/1                    |110/2                   |328/4|
-| **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|  
-</div>  
+| **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|
+</div>
 
 
 ## Release Plan
