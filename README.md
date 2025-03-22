@@ -5,8 +5,17 @@
 </div>
 
 # Latest News
-- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s.
-- [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
+- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. On 4xA5000 + 1TB host memory, DeepSeek-V2-236B Prefill.Decoding: 3150/196 tokens/s.
+- [2025-03] MoE-Gen V0.1 release. Empower **DeepSeek-R1-671B NO-Quantization** inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. Data parallel on multiple devices supported.
+
+# About
+MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-Expert(MoE)** based large language models. It is tailored for bulk **offline inference** tasks and **limited GPU resources**. It enables low cost serving for latency-insensitive applications.
+
+**Core Features**
+
+- **Module-Based Batching**: A fine-grained batching strategy ensures consistently high GPU utilization throughout every forward pass.
+- **Efficient Data Swapping Engine**: Supports inference of large-scale models (e.g., DeepSeek-R1) on constrained hardware setups such as single NVIDIA A5000 or RTX 4090 GPUs, aggressively maximizing overlap between computation and memory transfers to achieve optimal efficiency.
+- **Heterogeneous Computing**: Leverages under-utilized CPU resources and optimizes host data locality to significantly boost overall throughput.
 
 # Supported Models
 - **DeepSeek-R1/V3-671B. FULL Precision.**
@@ -32,12 +41,12 @@
 | **vLLM**      | Not Supported              | 97 / 0.9                |147/2                   |1347/31|
 | **Llama.cpp** | 5.7/0.9                  | 23/1                    |110/2                   |328/4|
 | **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|
-
 </div>
+
 
 ## Release Plan
 
-* Integrate DeepSeek FlashMLA and DeepGEMM.
+* Integrate speculative decoding for DeepSeek-R1.
 * Optimization on Ada and Hopper architecture.
 * Support moonshotai/Moonlight MoE.
 
