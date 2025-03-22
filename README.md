@@ -5,7 +5,7 @@
 </div>
 
 # Latest News
-- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s.
+- [2025-03-21] Integrated mat absorption for DeepSeek MLA. On single A5000-24GB, **DeepSeek-R1-671B BF16 decoding: 27 token/s**. DeepSeek-V2-236B decoding: 49 tokens/s. On 4xA5000 + 1TB host memory, DeepSeek-V2-236B Prefill.Decoding: 2925/196 tokens/s.
 - [2025-03] MoE-Gen V0.1 release. Empower DeepSeek-R1-671B inference on **a single** NVIDIA A5000 with prefill throughput **204 tokens/s**, decoding throughput **17 tokens/s**. We dequantize to BF16 in the runtime to have **FULL** precision (**_without any quantization_**) and to be runnable on Ampere architecture. Data parallel on multiple devices supported.
 
 # About
@@ -43,19 +43,6 @@ MoE-Gen is an efficient serving engine optimized specifically for **Mixture-of-E
 | **MoE-Gen**   | **204/27**                 | **787/49**              |**907/91**              |**2790/469**|  
 </div>  
 
-
-
-**4xA5000 + 1TB Host Memory.** Prompt length 512 tokens, decoding length 256 tokens. Prefill/decoding throughput in tokens/s.
-
-<div align="center">
-
-|               | DeepSeek-R1/V3 (671B-W8A16)| DeekSeek-V2 (236B-W16A16)|
-|:-------------:|:--------------------------:|:-----------------------:|
-| **SGLang**    | Not Supported              | Not Supported           |
-| **vLLM**      | Not Supported              | 97 / 0.9                |
-| **MoE-Gen**   | **204/27**                 | **2188/196**              |
-
-</div>
 
 ## Release Plan
 

@@ -506,6 +506,11 @@ class DeepSeek_Initializer:
         self.tensor_meta_shm_name = tensor_meta_shm_name
 
     def _default_engine_config(self):
+        props = torch.cuda.get_device_properties(
+            self.engine_config.Basic_Config.device
+        )
+        total_memory = props.total_memory / (1024**3)
+        logging.info(f"Current device total memory: {total_memory} GB")
         if (
             self.hf_model_config._name_or_path
             == "deepseek-ai/DeepSeek-V2-Lite-Chat"
@@ -672,21 +677,21 @@ class DeepSeek_Initializer:
             )
             if context_length > 768:
                 self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = math.floor(
-                    10 * 768 / context_length
+                    15 * 768 / context_length
                 )
                 self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = math.floor(
-                    20 * 768 / context_length
+                    30 * 768 / context_length
                 )
             else:
-                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = 10
-                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = 20
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size = 15
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size = 30
             logging.info(
                 f"attn_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size}"
             )
             logging.info(
                 f"MoE_prefill_micro_batch_size: {self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size}"
             )
-            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 2048
+            self.engine_config.Module_Batching_Config.expert_prefill_batch_size_upper_bound = 4096
 
             if context_length > 768:
                 self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size = math.floor(
@@ -699,6 +704,16 @@ class DeepSeek_Initializer:
             )
             self.engine_config.Module_Batching_Config.MoE_decoding_micro_batch_size = self.engine_config.Module_Batching_Config.global_batch_size
             self.engine_config.Module_Batching_Config.expert_decoding_batch_size_upper_bound = 2048
+
+            # L40
+            if total_memory >= 47 and total_memory < 49:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 2
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 2
+            if total_memory >= 78:
+                self.engine_config.Module_Batching_Config.attn_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.MoE_prefill_micro_batch_size *= 3
+                self.engine_config.Module_Batching_Config.attn_decoding_micro_batch_size *= 3
 
             self.engine_config.GPU_Buffer_Config.num_prefill_module_buffer = {
                 "attn": 1,
