@@ -1,5 +1,6 @@
 <div align="center">
- <h1> MoE-Gen
+ <img width="600" alt="MoE-Gen-Logo" src="https://github.com/user-attachments/assets/f8b4f18b-10a2-44af-bb37-5b9e69e3a7d0" />
+
  <h3>Extreme Throughput for Bulk Offline Inference for MoE Models with Limited GPU Resources</h3>
   <strong><a href="#Performance">Performance</a> | <a href="#Installation"> Installation</a> | <a href="#Quick-Start">Quick Start </a> </strong>
 </div>
