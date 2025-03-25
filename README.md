@@ -1,5 +1,12 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/8e70c5d1-6c3a-4507-b3b2-821ebf127989">
+    <img src="https://github.com/user-attachments/assets/5587e43e-a2ef-4dde-a84c-365c31f284f8" width=55%>
+  </picture>
+</p>
+
+
 <div align="center">
- <h1> MoE-Gen
  <h3>Extreme Throughput for Bulk Offline Inference for MoE Models with Limited GPU Resources</h3>
   <strong><a href="#Performance">Performance</a> | <a href="#Installation"> Installation</a> | <a href="#Quick-Start">Quick Start </a> </strong>
 </div>
